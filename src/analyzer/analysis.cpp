@@ -565,8 +565,8 @@ void register_analysis_callbacks(analysis_context& c)
     cb.on_memory_violate = make_callback(c, handle_memory_violate);
     cb.on_memory_allocate = make_callback(c, handle_memory_allocate);
 
-    cb.on_module_load = make_callback(c, handle_module_load);
-    cb.on_module_unload = make_callback(c, handle_module_unload);
+    cb.on_module_load.push_back(make_callback(c, handle_module_load));
+    cb.on_module_unload.push_back(make_callback(c, handle_module_unload));
 
     cb.on_thread_switch = make_callback(c, handle_thread_switch);
     cb.on_thread_set_name = make_callback(c, handle_thread_set_name);

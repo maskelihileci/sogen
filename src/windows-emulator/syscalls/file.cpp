@@ -2,6 +2,7 @@
 #include "../emulator_utils.hpp"
 #include "../syscall_utils.hpp"
 #include "utils/io.hpp"
+#include "../devices/console_driver.hpp"
 
 #include <iostream>
 #include <utils/finally.hpp>
@@ -142,15 +143,17 @@ namespace syscalls
         case FileFsDeviceInformation:
             return handle_query<FILE_FS_DEVICE_INFORMATION>(c.emu, fs_information, length, io_status_block,
                                                             [&](FILE_FS_DEVICE_INFORMATION& info) {
-                                                                if (file_handle == STDOUT_HANDLE)
+                                                                info.DeviceType = FILE_DEVICE_DISK;
+                                                                info.Characteristics = 0x20020;
+
+                                                                if (const auto* device = c.proc.devices.get(file_handle))
                                                                 {
-                                                                    info.DeviceType = FILE_DEVICE_CONSOLE;
-                                                                    info.Characteristics = 0x20000;
-                                                                }
-                                                                else
-                                                                {
-                                                                    info.DeviceType = FILE_DEVICE_DISK;
-                                                                    info.Characteristics = 0x20020;
+                                                                    if (dynamic_cast<console_driver*>(
+                                                                            device->get_internal_device()))
+                                                                    {
+                                                                        info.DeviceType = FILE_DEVICE_CONSOLE;
+                                                                        info.Characteristics = 0x20000;
+                                                                    }
                                                                 }
                                                             });
 
@@ -702,6 +705,24 @@ namespace syscalls
             return STATUS_SUCCESS;
         }
 
+        // If the handle is a device, it's likely our console.
+        if (file_handle.value.type == handle_types::device)
+        {
+            const auto* d = c.proc.devices.get(file_handle);
+            if (d && dynamic_cast<console_driver*>(d->get_internal_device()))
+            {
+                c.win_emu.callbacks.on_stdout(temp_buffer);
+                if (io_status_block)
+                {
+                    IO_STATUS_BLOCK<EmulatorTraits<Emu64>> block{};
+                    block.Information = length;
+                    block.Status = STATUS_SUCCESS;
+                    io_status_block.write(block);
+                }
+                return STATUS_SUCCESS;
+            }
+        }
+
         const auto* container = c.proc.devices.get(file_handle);
         if (container)
         {
@@ -727,6 +748,20 @@ namespace syscalls
         if (!f)
         {
             return STATUS_INVALID_HANDLE;
+        }
+
+        // Fallback for file-based console handles after freopen
+        if (f->name.find(u"CONOUT$") != std::u16string::npos)
+        {
+            c.win_emu.callbacks.on_stdout(temp_buffer);
+            if (io_status_block)
+            {
+                IO_STATUS_BLOCK<EmulatorTraits<Emu64>> block{};
+                block.Information = length;
+                block.Status = STATUS_SUCCESS;
+                io_status_block.write(block);
+            }
+            return STATUS_SUCCESS;
         }
 
         const auto bytes_written = fwrite(temp_buffer.data(), 1, temp_buffer.size(), f->handle);
@@ -804,17 +839,14 @@ namespace syscalls
 
         const auto path = filename.substr(unc_prefix.size());
 
-        const std::set<std::u16string, std::less<>> devices{
-            u"Nsi",
-            u"MountPointManager",
-        };
-
-        if (devices.contains(path))
+        // If the path after the prefix contains a drive letter (e.g., C:), it's a regular file path, not a device.
+        if (path.size() > 2 && path[1] == ':' && std::isalpha(static_cast<unsigned char>(path[0])))
         {
-            return path;
+            return std::nullopt;
         }
 
-        return std::nullopt;
+        // Otherwise, treat it as a device name.
+        return path;
     }
 
     NTSTATUS handle_named_pipe_create(const syscall_context& c, const emulator_object<handle>& out_handle,
@@ -843,25 +875,40 @@ namespace syscalls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS handle_NtCreateFile(const syscall_context& c, const emulator_object<handle> file_handle, ACCESS_MASK desired_access,
+    NTSTATUS handle_NtCreateFile(const syscall_context& c, const emulator_object<handle> file_handle,
+                                 ACCESS_MASK desired_access,
                                  const emulator_object<OBJECT_ATTRIBUTES<EmulatorTraits<Emu64>>> object_attributes,
                                  const emulator_object<IO_STATUS_BLOCK<EmulatorTraits<Emu64>>> /*io_status_block*/,
                                  const emulator_object<LARGE_INTEGER> /*allocation_size*/, ULONG /*file_attributes*/,
-                                 ULONG /*share_access*/, ULONG create_disposition, ULONG create_options, uint64_t ea_buffer,
-                                 ULONG ea_length)
+                                 ULONG /*share_access*/, ULONG create_disposition, ULONG create_options,
+                                 uint64_t ea_buffer, ULONG ea_length)
     {
         const auto attributes = object_attributes.read();
         auto filename = read_unicode_string(c.emu, attributes.ObjectName);
+        
+        c.win_emu.log.info("NtCreateFile called with filename: %s\n", u16_to_u8(filename).c_str());
 
-        if (is_named_pipe_path(filename))
+        // First, check for console-specific paths.
+        if (console_driver::parse_path(filename).has_value())
         {
-            return handle_named_pipe_create(c, file_handle, filename, attributes, desired_access);
+            const io_device_creation_data data{
+                .buffer = ea_buffer,
+                .length = ea_length,
+            };
+
+            io_device_container container{u"ConDrv", c.win_emu, data};
+            if (!container)
+            {
+                return STATUS_OBJECT_NAME_NOT_FOUND;
+            }
+            
+            const auto handle = c.proc.devices.store(std::move(container));
+            file_handle.write(handle);
+
+            return STATUS_SUCCESS;
         }
 
-        auto printer = utils::finally([&] {
-            c.win_emu.callbacks.on_generic_access("Opening file", filename); //
-        });
-
+        // If not a console path, check for other generic device paths.
         const auto io_device_name = get_io_device_name(filename);
         if (io_device_name.has_value())
         {
@@ -872,12 +919,18 @@ namespace syscalls
 
             io_device_container container{std::u16string(*io_device_name), c.win_emu, data};
 
+            if (!container)
+            {
+                return STATUS_OBJECT_NAME_NOT_FOUND;
+            }
+
             const auto handle = c.proc.devices.store(std::move(container));
             file_handle.write(handle);
 
             return STATUS_SUCCESS;
         }
 
+        // Handle pseudo-handles for console reference/connect paths, which is a special case.
         handle root_handle{};
         root_handle.bits = attributes.RootDirectory;
         if (root_handle.value.is_pseudo && (filename == u"\\Reference" || filename == u"\\Connect"))
@@ -886,24 +939,83 @@ namespace syscalls
             return STATUS_SUCCESS;
         }
 
+        auto printer = utils::finally([&] {
+            c.win_emu.callbacks.on_generic_access("Opening file", filename); //
+        });
+
         file f{};
         f.name = std::move(filename);
 
         if (attributes.RootDirectory)
         {
-            const auto* root = c.proc.files.get(attributes.RootDirectory);
-            if (!root)
+            auto* device = c.proc.devices.get(attributes.RootDirectory);
+            if (device)
             {
-                return STATUS_INVALID_HANDLE;
+                auto new_file = device->get_internal_device()->open(c.win_emu, f.name);
+                if (!new_file)
+                {
+                    return STATUS_OBJECT_NAME_NOT_FOUND;
+                }
+                
+                const auto handle = c.proc.files.store(std::move(*new_file));
+                file_handle.write(handle);
+                
+                return STATUS_SUCCESS;
             }
 
-            const auto has_separator = root->name.ends_with(u"\\") || root->name.ends_with(u"/");
-            f.name = root->name + (has_separator ? u"" : u"\\") + f.name;
+            const auto* root_file = c.proc.files.get(attributes.RootDirectory);
+            if (root_file)
+            {
+                // If the root is a file, concatenate the paths.
+                c.win_emu.log.info("NtCreateFile RootDirectory is a file with name: %s\n",
+                                   u16_to_u8(root_file->name).c_str());
+
+                // If the object name is an absolute path, treat it as a relative path.
+                if (!f.name.empty() && (f.name[0] == u'\\' || f.name[0] == u'/'))
+                {
+                    f.name.erase(0, 1);
+                }
+
+                const auto has_separator = root_file->name.ends_with(u"\\") || root_file->name.ends_with(u"/");
+                f.name = root_file->name + (has_separator ? u"" : u"\\") + f.name;
+
+                // Re-check for device paths after concatenating with RootDirectory.
+                if (console_driver::parse_path(f.name).has_value())
+                {
+                    // This is a console-specific path, create a ConDrv device.
+                    const io_device_creation_data data{ .buffer = ea_buffer, .length = ea_length };
+                    io_device_container container{u"ConDrv", c.win_emu, data};
+                    if (!container) return STATUS_OBJECT_NAME_NOT_FOUND;
+                    
+                    const auto handle = c.proc.devices.store(std::move(container));
+                    file_handle.write(handle);
+                    return STATUS_SUCCESS;
+                }
+
+                const auto final_device_name = get_io_device_name(f.name);
+                if (final_device_name.has_value())
+                {
+                    // This is a generic device path.
+                    const io_device_creation_data data{ .buffer = ea_buffer, .length = ea_length };
+                    io_device_container container{std::u16string(*final_device_name), c.win_emu, data};
+                    if (!container) return STATUS_OBJECT_NAME_NOT_FOUND;
+
+                    const auto handle = c.proc.devices.store(std::move(container));
+                    file_handle.write(handle);
+                    return STATUS_SUCCESS;
+                }
+            }
+            else
+            {
+                c.win_emu.log.error("NtCreateFile RootDirectory handle %llX is not a valid file or device handle.\n",
+                                    attributes.RootDirectory);
+                return STATUS_INVALID_HANDLE;
+            }
         }
 
-        printer.cancel();
+       printer.cancel();
 
-        std::error_code ec{};
+       std::error_code ec{};
 
         const windows_path path = f.name;
         const bool is_directory = std::filesystem::is_directory(c.win_emu.file_sys.translate(path), ec);
