@@ -6,7 +6,6 @@
 #include <string_view>
 
 
-// Forward declaration
 class windows_emulator;
 
 enum class console_file_type

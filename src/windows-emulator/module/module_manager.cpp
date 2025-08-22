@@ -124,9 +124,9 @@ mapped_module* module_manager::map_local_module(const std::filesystem::path& fil
 
         const auto image_base = mod.image_base;
         const auto entry = this->modules_.try_emplace(image_base, std::move(mod));
-        for (const auto& callback : this->callbacks_->on_module_load)
+        if (this->callbacks_->on_module_load)
         {
-            callback(entry.first->second);
+            this->callbacks_->on_module_load(entry.first->second);
         }
         return &entry.first->second;
     }
@@ -160,9 +160,9 @@ mapped_module* module_manager::map_memory_module(uint64_t base_address, uint64_t
 
         const auto image_base = mod.image_base;
         const auto entry = this->modules_.try_emplace(image_base, std::move(mod));
-        for (const auto& callback : this->callbacks_->on_module_load)
+        if (this->callbacks_->on_module_load)
         {
-            callback(entry.first->second);
+            this->callbacks_->on_module_load(entry.first->second);
         }
         return &entry.first->second;
     }
@@ -213,9 +213,9 @@ bool module_manager::unmap(const uint64_t address)
         return true;
     }
 
-    for (const auto& callback : this->callbacks_->on_module_unload)
+    if (this->callbacks_->on_module_unload)
     {
-        callback(mod->second);
+        this->callbacks_->on_module_unload(mod->second);
     }
     unmap_module(*this->memory_, mod->second);
     this->modules_.erase(mod);

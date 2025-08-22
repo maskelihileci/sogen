@@ -47,7 +47,6 @@ namespace syscalls
 
         if (source_handle == CURRENT_PROCESS)
         {
-        // A real handle to the current process is requested
         target_handle.write(make_handle(c.proc.id, handle_types::process, false));
         return STATUS_SUCCESS;
         }

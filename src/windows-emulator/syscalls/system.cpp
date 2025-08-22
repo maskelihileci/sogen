@@ -92,7 +92,7 @@ namespace syscalls
     {
         switch (info_class)
         {
-        case SystemSupportedProcessorArchitectures: // The IsWow64Process call was giving the error "Unsupported system info class: B5", so a code change was made to fix it.
+        case SystemSupportedProcessorArchitectures:
             return handle_query<ULONG>(c.emu, system_information, system_information_length, return_length,
                                        [&](ULONG& info) {
                                            info = 3;

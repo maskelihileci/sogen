@@ -25,8 +25,6 @@ namespace syscalls
         case ProcessWow64Information:
             return handle_query<ULONG>(c.emu, process_information, process_information_length, return_length,
                                        [&](ULONG& info) {
-                                           // We are a 64-bit process emulating a 64-bit process,
-                                           // so we are not running under WOW64.
                                            info = 3;
                                        });
 

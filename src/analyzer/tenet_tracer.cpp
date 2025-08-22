@@ -66,8 +66,8 @@ tenet_tracer::tenet_tracer(windows_emulator& win_emu, const std::filesystem::pat
     }
     else
     {
-        win_emu_.add_module_load_callback([this](auto& mod) { this->on_module_load(mod); });
-        win_emu_.add_module_unload_callback([this](auto& mod) { this->on_module_unload(mod); });
+        win_emu_.callbacks.on_module_load = [this](auto& mod) { this->on_module_load(mod); };
+        win_emu_.callbacks.on_module_unload = [this](auto& mod) { this->on_module_unload(mod); };
     }
 }
 
@@ -212,7 +212,6 @@ void tenet_tracer::on_module_unload(const mapped_module& mod)
     tracing_active_ = false;
     traced_module_base_ = 0;
 
-    // Stop all tracing hooks
     read_hook_ = {};
     write_hook_ = {};
     execute_hook_ = {};

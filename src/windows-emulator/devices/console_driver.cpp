@@ -8,8 +8,6 @@
 
 std::optional<console_file_type> console_driver::parse_path(std::u16string_view path)
 {
-    // This function now only handles console-specific paths.
-    // Generic device paths are handled by `get_io_device_name` in file.cpp.
 
     constexpr std::u16string_view unc_prefix = u"\\??\\";
     if (utils::string::starts_with_ignore_case(path, unc_prefix))
@@ -21,7 +19,6 @@ std::optional<console_file_type> console_driver::parse_path(std::u16string_view 
         }
     }
     
-    // Legacy DOS device names
     if (utils::string::equals_ignore_case(path, std::u16string_view(u"CONOUT$")))
     {
         return console_file_type::OUTPUT;
@@ -32,14 +29,12 @@ std::optional<console_file_type> console_driver::parse_path(std::u16string_view 
         return console_file_type::INPUT;
     }
 
-    // Handle \Device\ConDrv and its sub-paths
     constexpr std::u16string_view device_prefix = u"\\Device\\ConDrv";
     if (utils::string::starts_with_ignore_case(path, device_prefix))
     {
         return console_file_type::SERVER;
     }
 
-    // Relative paths used with a RootDirectory handle
     if (utils::string::equals_ignore_case(path, std::u16string_view(u"Reference")))
     {
         return console_file_type::REFERENCE;
@@ -56,8 +51,6 @@ NTSTATUS console_driver::io_control(windows_emulator& win_emu, const io_device_c
 {
     win_emu.log.info("Console driver received IOCTL: %X\n", context.io_control_code);
 
-    // For now, we'll just return success for any IOCTL to get AllocConsole to work.
-    // We will implement specific handlers later.
     return STATUS_SUCCESS;
 }
 
@@ -67,9 +60,6 @@ std::unique_ptr<file> console_driver::open(windows_emulator& win_emu, std::u16st
 
     auto f = std::make_unique<file>();
 
-    // The incoming path might be a sub-path relative to another virtual file (e.g., "\Connect" relative to "\Device\ConDrv\Reference").
-    // The syscall layer might incorrectly concatenate them.
-    // We make this function robust by always parsing the last component of the path.
     if (const auto last_slash = path.find_last_of(u"/\\"); last_slash != std::u16string_view::npos)
     {
         path = path.substr(last_slash + 1);
