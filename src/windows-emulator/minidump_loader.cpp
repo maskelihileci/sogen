@@ -562,10 +562,26 @@ namespace minidump_loader
                     thread.teb->set_address(thread_info.teb);
 
                     // Reconstruct TEB stack limits
-                    auto teb = thread.teb->read();
-                    teb.NtTib.StackBase = thread_info.stack_start_of_memory_range + thread_info.stack_data_size;
-                    teb.NtTib.StackLimit = thread_info.stack_start_of_memory_range;
-                    thread.teb->write(teb);
+                    auto teb_writable = thread.teb->read(); // Create a mutable copy
+                    teb_writable.NtTib.StackBase = thread_info.stack_start_of_memory_range + thread_info.stack_data_size;
+                    
+                    // Manually reserve a larger stack region to ensure _alloca_probe can touch it.
+                    // Minidump memory region info might be incomplete for reserved stack pages.
+                    constexpr uint64_t MINIDUMP_STACK_RESERVE_SIZE = 1 * 1024 * 1024; // 1 MB
+                    const uint64_t stack_allocation_base = teb_writable.NtTib.StackBase - MINIDUMP_STACK_RESERVE_SIZE;
+                    
+                    // Check if the region is already mapped before trying to allocate it.
+                    if (win_emu.memory.get_region_info(stack_allocation_base).length == 0)
+                    {
+                        win_emu.memory.allocate_memory(stack_allocation_base, MINIDUMP_STACK_RESERVE_SIZE, memory_permission::read | memory_permission::write, true);
+                        win_emu.log.info("  Manually reserved stack for TID %u at 0x%" PRIx64 " (Size: %u KB)\n",
+                                         thread_info.thread_id, stack_allocation_base, MINIDUMP_STACK_RESERVE_SIZE / 1024);
+                    }
+
+                    // The actual limit should be the base of the entire reserved region
+                    teb_writable.NtTib.StackLimit = stack_allocation_base;
+
+                    thread.teb->write(teb_writable);
                 }
 
                 // Load CPU context if available
