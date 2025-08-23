@@ -297,7 +297,7 @@ namespace
             {
                 // For minidumps, don't start execution automatically; just report ready state
                 win_emu.log.print(color::green, "Minidump loaded successfully. Process state ready for analysis.\n");
-                return true; // Return success without starting emulation
+                win_emu.start();
             }
             else
             {

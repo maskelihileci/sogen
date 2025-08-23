@@ -6,11 +6,33 @@
 #include "common/platform/unicode.hpp"
 #include "common/platform/kernel_mapped.hpp"
 #include "memory_utils.hpp"
+#include "cpu_context.hpp"
 
 #include <minidump/minidump.hpp>
 
 namespace minidump_loader
 {
+    namespace
+    {
+        void setup_gdt(x86_64_emulator& emu, memory_manager& memory)
+        {
+            memory.allocate_memory(GDT_ADDR, static_cast<size_t>(page_align_up(GDT_LIMIT)), memory_permission::read);
+            emu.load_gdt(GDT_ADDR, GDT_LIMIT);
+
+            emu.write_memory<uint64_t>(GDT_ADDR + 6 * (sizeof(uint64_t)), 0xEFFE000000FFFF);
+            emu.reg<uint16_t>(x86_register::cs, 0x33);
+
+            emu.write_memory<uint64_t>(GDT_ADDR + 5 * (sizeof(uint64_t)), 0xEFF6000000FFFF);
+            emu.reg<uint16_t>(x86_register::ss, 0x2B);
+        }
+
+        void setup_infrastructure(windows_emulator& win_emu)
+        {
+            win_emu.log.info("Setting up base infrastructure (GDT, KUSD)\n");
+            setup_gdt(win_emu.emu(), win_emu.memory);
+            win_emu.process.kusd.setup();
+        }
+    }
     struct dump_statistics
     {
         size_t thread_count = 0;
@@ -366,16 +388,25 @@ namespace minidump_loader
         return name.find(".exe") != std::string::npos;
     }
 
+    bool ends_with_insensitive(const std::string& str, const std::string& suffix)
+    {
+        if (str.length() < suffix.length())
+        {
+            return false;
+        }
+        return std::equal(suffix.rbegin(), suffix.rend(), str.rbegin(), [](char a, char b) {
+            return std::tolower(a) == std::tolower(b);
+        });
+    }
+
     bool is_ntdll(const minidump::module_info& mod)
     {
-        const auto name = mod.module_name;
-        return name == "ntdll.dll" || name == "NTDLL.DLL";
+        return ends_with_insensitive(mod.module_name, "ntdll.dll");
     }
 
     bool is_win32u(const minidump::module_info& mod)
     {
-        const auto name = mod.module_name;
-        return name == "win32u.dll" || name == "WIN32U.DLL";
+        return ends_with_insensitive(mod.module_name, "win32u.dll");
     }
 
     void reconstruct_module_state(windows_emulator& win_emu, const minidump::minidump_file* dump_file)
@@ -417,6 +448,14 @@ namespace minidump_loader
                         win_emu.mod_manager.ntdll = mapped_module;
                         identified_count++;
                         win_emu.log.info("    Identified as ntdll\n");
+
+                        auto& process = win_emu.process;
+                        process.ntdll_image_base = mapped_module->image_base;
+                        process.ldr_initialize_thunk = mapped_module->find_export("LdrInitializeThunk");
+                        process.rtl_user_thread_start = mapped_module->find_export("RtlUserThreadStart");
+                        process.ki_user_apc_dispatcher = mapped_module->find_export("KiUserApcDispatcher");
+                        process.ki_user_exception_dispatcher = mapped_module->find_export("KiUserExceptionDispatcher");
+                        win_emu.log.info("    ntdll function pointers resolved\n");
                     }
                     else if (is_win32u(mod))
                     {
@@ -503,6 +542,10 @@ namespace minidump_loader
         size_t success_count = 0;
         size_t context_loaded_count = 0;
 
+        const auto* exception_info = dump_file->get_exception_info();
+        const uint32_t exception_thread_id = exception_info ? exception_info->thread_id : threads[0].thread_id;
+        emulator_thread* active_thread = nullptr;
+
         for (const auto& thread_info : threads)
         {
             try
@@ -512,6 +555,19 @@ namespace minidump_loader
                 thread.stack_base = thread_info.stack_start_of_memory_range;
                 thread.stack_size = thread_info.stack_data_size;
 
+                // Set TEB address if valid
+                if (thread_info.teb != 0)
+                {
+                    thread.teb.emplace(win_emu.memory);
+                    thread.teb->set_address(thread_info.teb);
+
+                    // Reconstruct TEB stack limits
+                    auto teb = thread.teb->read();
+                    teb.NtTib.StackBase = thread_info.stack_start_of_memory_range + thread_info.stack_data_size;
+                    teb.NtTib.StackLimit = thread_info.stack_start_of_memory_range;
+                    thread.teb->write(teb);
+                }
+
                 // Load CPU context if available
                 const bool context_loaded = load_thread_context(minidump_path, thread_info, thread.last_registers);
                 if (context_loaded)
@@ -519,19 +575,17 @@ namespace minidump_loader
                     context_loaded_count++;
                 }
 
-                // Set TEB address if valid
-                if (thread_info.teb != 0)
-                {
-                    thread.teb = emulator_object<TEB64>(win_emu.memory);
-                    thread.teb->set_address(thread_info.teb);
-                }
-
                 win_emu.log.info("  Thread %u: TEB=0x%" PRIx64 ", stack=0x%" PRIx64 " (%u bytes), context=%s\n", thread_info.thread_id,
                                  thread_info.teb, thread.stack_base, thread_info.stack_data_size,
                                  context_loaded ? "loaded" : "unavailable");
 
-                win_emu.process.threads.store(std::move(thread));
+                auto [h, thr] = win_emu.process.threads.store_and_get(std::move(thread));
                 success_count++;
+
+                if (thr->id == exception_thread_id)
+                {
+                    active_thread = thr;
+                }
             }
             catch (const std::exception& e)
             {
@@ -539,17 +593,49 @@ namespace minidump_loader
             }
         }
 
-        // Set active thread to first available thread
-        if (success_count > 0)
+        // Set active thread to the one that caused the exception
+        if (active_thread)
+        {
+            win_emu.log.info("Setting active thread to %u (exception thread)\n", active_thread->id);
+            win_emu.process.active_thread = active_thread;
+
+            if (!active_thread->last_registers.empty())
+            {
+                const auto* context = reinterpret_cast<const CONTEXT64*>(active_thread->last_registers.data());
+                cpu_context::restore(win_emu.emu(), *context);
+
+                // If the trap flag is set in the minidump's context, clear it.
+                // This prevents the emulator from immediately breaking on a single-step exception
+                // which is often not the desired behavior when analyzing a crash dump.
+                const auto eflags = win_emu.emu().reg<uint32_t>(x86_register::eflags);
+                if (eflags & 0x100)
+                {
+                    win_emu.log.info("  Clearing trap flag set in minidump context (EFlags=0x%X)\n", eflags);
+                    win_emu.emu().reg<uint32_t>(x86_register::eflags, eflags & ~0x100);
+                }
+
+                win_emu.log.info("  Restored CPU context from minidump. RIP=0x%" PRIx64 ", RSP=0x%" PRIx64 "\n", context->Rip,
+                                 context->Rsp);
+
+                // This is the critical part: Set the GS base to the TEB address for the active thread
+                if (active_thread->teb && active_thread->teb->value() != 0)
+                {
+                    win_emu.emu().set_segment_base(x86_register::gs_base, active_thread->teb->value());
+                    win_emu.log.info("  Set GS base to TEB: 0x%" PRIx64 "\n", active_thread->teb->value());
+                }
+            }
+        }
+        else if (success_count > 0)
         {
             auto& first_thread = win_emu.process.threads.begin()->second;
             win_emu.process.active_thread = &first_thread;
+            win_emu.log.warn("Exception thread not found, setting active thread to %u\n", first_thread.id);
         }
 
         win_emu.log.info("Thread reconstruction: %zu/%zu threads created, %zu with context\n", success_count, threads.size(),
                          context_loaded_count);
     }
-
+    
     void setup_peb_from_teb(windows_emulator& win_emu, const minidump::minidump_file* dump_file)
     {
         const auto& threads = dump_file->threads();
@@ -679,19 +765,40 @@ namespace minidump_loader
                 throw std::runtime_error("Minidump compatibility validation failed");
             }
 
+            // 1. Setup minimal OS infrastructure that is not part of the dump
+            setup_infrastructure(win_emu);
             setup_kusd_from_dump(win_emu, dump_file.get());
 
             dump_statistics stats;
             log_dump_summary(win_emu, dump_file.get(), stats);
             process_streams(win_emu, dump_file.get());
 
-            // Existing phases
+            // 2. Reconstruct the memory map and content from the dump
             reconstruct_memory_state(win_emu, dump_file.get(), dump_reader.get());
+
+            // 3. Reconstruct modules from memory and resolve critical ntdll functions
             reconstruct_module_state(win_emu, dump_file.get());
 
-            // Process state reconstruction phases
+            // 4. Setup syscall dispatcher now that modules are loaded
+            win_emu.log.info("Setting up syscall dispatcher...\n");
+            const auto* ntdll = win_emu.mod_manager.ntdll;
+            const auto* win32u = win_emu.mod_manager.win32u;
+
+            if (ntdll && win32u)
+            {
+                const auto ntdll_data = win_emu.emu().read_memory(ntdll->image_base, static_cast<size_t>(ntdll->size_of_image));
+                const auto win32u_data = win_emu.emu().read_memory(win32u->image_base, static_cast<size_t>(win32u->size_of_image));
+                win_emu.dispatcher.setup(ntdll->exports, ntdll_data, win32u->exports, win32u_data);
+                win_emu.log.info("Syscall dispatcher setup complete.\n");
+            }
+            else
+            {
+                win_emu.log.error("ntdll or win32u module not found, syscall dispatcher cannot be set up.\n");
+            }
+
+            // 5. Reconstruct the rest of the process state
             setup_peb_from_teb(win_emu, dump_file.get());
-            reconstruct_threads(win_emu, dump_file.get(), minidump_path);
+            reconstruct_threads(win_emu, dump_file.get(), minidump_path); // This will also set the active thread and its context
             reconstruct_handle_table(win_emu, dump_file.get());
             setup_exception_context(win_emu, dump_file.get());
 
