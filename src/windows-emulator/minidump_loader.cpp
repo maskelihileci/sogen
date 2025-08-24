@@ -564,23 +564,44 @@ namespace minidump_loader
                     // Reconstruct TEB stack limits
                     auto teb_writable = thread.teb->read(); // Create a mutable copy
                     teb_writable.NtTib.StackBase = thread_info.stack_start_of_memory_range + thread_info.stack_data_size;
-                    
-                    // Manually reserve a larger stack region to ensure _alloca_probe can touch it.
-                    // Minidump memory region info might be incomplete for reserved stack pages.
-                    constexpr uint64_t MINIDUMP_STACK_RESERVE_SIZE = 1 * 1024 * 1024; // 1 MB
-                    const uint64_t stack_allocation_base = teb_writable.NtTib.StackBase - MINIDUMP_STACK_RESERVE_SIZE;
-                    
-                    // Check if the region is already mapped before trying to allocate it.
-                    if (win_emu.memory.get_region_info(stack_allocation_base).length == 0)
+
+                    // Try to read the original StackLimit directly from the TEB memory in the dump
+                    uint64_t original_stack_limit_from_teb = 0;
+                    try
                     {
-                        win_emu.memory.allocate_memory(stack_allocation_base, MINIDUMP_STACK_RESERVE_SIZE, memory_permission::read | memory_permission::write, true);
-                        win_emu.log.info("  Manually reserved stack for TID %u at 0x%" PRIx64 " (Size: %u KB)\n",
-                                         thread_info.thread_id, stack_allocation_base, MINIDUMP_STACK_RESERVE_SIZE / 1024);
+                        win_emu.memory.read_memory(thread_info.teb + offsetof(TEB64, NtTib) + offsetof(NT_TIB64, StackLimit),
+                                                   &original_stack_limit_from_teb, sizeof(original_stack_limit_from_teb));
+                    }
+                    catch (const std::exception&)
+                    {
+                        // Ignore if we can't read it, we'll fall back.
+                        original_stack_limit_from_teb = 0;
                     }
 
-                    // The actual limit should be the base of the entire reserved region
-                    teb_writable.NtTib.StackLimit = stack_allocation_base;
+                    // The minidump info stream gives us the limit of the committed part of the stack.
+                    const uint64_t stack_limit_from_info = thread_info.stack_start_of_memory_range;
+                    
+                    // The real stack limit is the lowest of these two values (if the TEB one is valid).
+                    uint64_t final_stack_limit = stack_limit_from_info;
+                    if (original_stack_limit_from_teb != 0 && original_stack_limit_from_teb < final_stack_limit)
+                    {
+                        final_stack_limit = original_stack_limit_from_teb;
+                    }
 
+                    const uint64_t stack_allocation_base = final_stack_limit;
+                    const size_t stack_size = teb_writable.NtTib.StackBase - stack_allocation_base;
+
+                    // Reserve the entire stack region.
+                    if (stack_size > 0)
+                    {
+                        win_emu.memory.allocate_memory(stack_allocation_base, stack_size, memory_permission::read | memory_permission::write, true);
+                        win_emu.log.info("  Dynamically reserved stack for TID %u at 0x%" PRIx64 " (Size: %zu KB)\n",
+                                         thread_info.thread_id, stack_allocation_base, stack_size / 1024);
+                    }
+                    
+                    // Set the final, correct stack limit in our TEB copy.
+                    teb_writable.NtTib.StackLimit = final_stack_limit;
+                    
                     thread.teb->write(teb_writable);
                 }
 
