@@ -48,31 +48,27 @@ namespace
     }
 }
 
-tenet_tracer::tenet_tracer(windows_emulator& win_emu, const std::filesystem::path& log_filename)
+tenet_tracer::tenet_tracer(windows_emulator& win_emu, const std::filesystem::path& log_filename,
+                           const std::set<std::string, std::less<>>& modules)
     : win_emu_(win_emu),
-      log_file_(log_filename)
+      log_file_(log_filename),
+      traced_modules_(modules)
 {
     if (!log_file_)
     {
         throw std::runtime_error("TenetTracer: Failed to open log file -> " + log_filename.string());
     }
 
-    auto& emu = win_emu_.emu();
-
-    auto* read_hook = emu.hook_memory_read(0, 0xFFFFFFFFFFFFFFFF, [this](uint64_t a, const void* d, size_t s) {
-        this->log_memory_read(a, d, s); //
-    });
-    read_hook_ = scoped_hook(emu, read_hook);
-
-    auto* write_hook = emu.hook_memory_write(0, 0xFFFFFFFFFFFFFFFF, [this](uint64_t a, const void* d, size_t s) {
-        this->log_memory_write(a, d, s); //
-    });
-    write_hook_ = scoped_hook(emu, write_hook);
-
-    auto* execute_hook = emu.hook_memory_execution([&](uint64_t address) {
-        this->process_instruction(address); //
-    });
-    execute_hook_ = scoped_hook(emu, execute_hook);
+    if (traced_modules_.empty())
+    {
+        setup_tracing_hooks();
+        tracing_active_ = true;
+    }
+    else
+    {
+        win_emu_.callbacks.on_module_load = [this](auto& mod) { this->on_module_load(mod); };
+        win_emu_.callbacks.on_module_unload = [this](auto& mod) { this->on_module_unload(mod); };
+    }
 }
 
 tenet_tracer::~tenet_tracer()
@@ -92,98 +88,195 @@ void tenet_tracer::filter_and_write_buffer()
         return;
     }
 
-    const auto* exe_module = win_emu_.mod_manager.executable;
-    if (!exe_module)
+    // Write module header if it exists (mb=... or mu=...)
+    for (const auto& line : raw_log_buffer_)
     {
-        for (const auto& line : raw_log_buffer_)
+        if (line.rfind("mb=", 0) == 0 || line.rfind("mu=", 0) == 0)
         {
             log_file_ << line << '\n';
         }
-
-        return;
     }
 
-    if (!raw_log_buffer_.empty())
+    // If we are in module tracing mode (-m), use a simple, direct filter.
+    if (!traced_modules_.empty())
     {
-        log_file_ << raw_log_buffer_.front() << '\n';
+        for (const auto& line : raw_log_buffer_)
+        {
+            const size_t rip_pos = line.find("rip=0x");
+            if (rip_pos == std::string::npos) continue;
+
+            char* end_ptr = nullptr;
+            const uint64_t address = std::strtoull(line.c_str() + rip_pos + 6, &end_ptr, 16);
+            const auto* mod = win_emu_.mod_manager.find_by_address(address);
+            if (!mod) continue;
+            
+            bool is_in_traced_module = false;
+            for (const auto& traced_name : traced_modules_)
+            {
+                std::string mod_name_lower = mod->name;
+                std::string traced_name_lower = traced_name;
+                std::transform(mod_name_lower.begin(), mod_name_lower.end(), mod_name_lower.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                std::transform(traced_name_lower.begin(), traced_name_lower.end(), traced_name_lower.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+                if (mod_name_lower.find(traced_name_lower) != std::string::npos)
+                {
+                    is_in_traced_module = true;
+                    break;
+                }
+            }
+
+            if (is_in_traced_module)
+            {
+                log_file_ << line << '\n';
+            }
+        }
     }
-
-    bool currently_outside = false;
-    std::map<std::string, std::string> accumulated_changes;
-
-    for (size_t i = 1; i < raw_log_buffer_.size(); ++i)
+    else // Default behavior: use the complex accumulator logic for the main executable.
     {
-        const auto& line = raw_log_buffer_[i];
+        const auto* exe_module = win_emu_.mod_manager.executable;
+        if (!exe_module) return;
 
-        size_t rip_pos = line.find("rip=0x");
-        if (rip_pos == std::string::npos)
+        if (!raw_log_buffer_.empty())
         {
-            continue;
+             log_file_ << raw_log_buffer_.front() << '\n';
         }
+        
+        bool currently_outside = false;
+        std::map<std::string, std::string> accumulated_changes;
 
-        char* end_ptr = nullptr;
-        uint64_t address = std::strtoull(line.c_str() + rip_pos + 6, &end_ptr, 16);
-
-        bool is_line_inside = exe_module->is_within(address);
-        const auto _1 = utils::finally([&] {
-            currently_outside = !is_line_inside; //
-        });
-
-        if (!is_line_inside)
+        for (size_t i = 1; i < raw_log_buffer_.size(); ++i)
         {
-            parse_and_accumulate_changes(line, accumulated_changes);
-            continue;
-        }
+            const auto& line = raw_log_buffer_[i];
+            const size_t rip_pos = line.find("rip=0x");
+            if (rip_pos == std::string::npos) continue;
 
-        const auto _2 = utils::finally([&] {
-            log_file_ << line << '\n'; //
-        });
-
-        if (!currently_outside || accumulated_changes.empty())
-        {
-            continue;
-        }
-
-        std::stringstream summary_line;
-        bool first = true;
-
-        auto rip_it = accumulated_changes.find("rip");
-        std::string last_rip;
-        if (rip_it != accumulated_changes.end())
-        {
-            last_rip = rip_it->second;
-            accumulated_changes.erase(rip_it);
-        }
-
-        for (const auto& pair : accumulated_changes)
-        {
-            if (!first)
+            char* end_ptr = nullptr;
+            const uint64_t address = std::strtoull(line.c_str() + rip_pos + 6, &end_ptr, 16);
+            const bool is_line_inside = exe_module->is_within(address);
+            
+            if (!is_line_inside)
             {
-                summary_line << ",";
+                parse_and_accumulate_changes(line, accumulated_changes);
             }
-            summary_line << pair.first << "=" << pair.second;
-            first = false;
-        }
-
-        if (!last_rip.empty())
-        {
-            if (!first)
+            else
             {
-                summary_line << ",";
+                if (currently_outside && !accumulated_changes.empty())
+                {
+                    std::stringstream summary_line;
+                    bool first = true;
+                    auto rip_it = accumulated_changes.find("rip");
+                    std::string last_rip;
+                    if (rip_it != accumulated_changes.end())
+                    {
+                        last_rip = rip_it->second;
+                        accumulated_changes.erase(rip_it);
+                    }
+                    for (const auto& pair : accumulated_changes)
+                    {
+                        if (!first) summary_line << ",";
+                        summary_line << pair.first << "=" << pair.second;
+                        first = false;
+                    }
+                    if (!last_rip.empty())
+                    {
+                        if (!first) summary_line << ",";
+                        summary_line << "rip=" << last_rip;
+                    }
+                    log_file_ << summary_line.str() << '\n';
+                    accumulated_changes.clear();
+                }
+                log_file_ << line << '\n';
             }
-            summary_line << "rip=" << last_rip;
+            currently_outside = !is_line_inside;
         }
-
-        log_file_ << summary_line.str() << '\n';
-        accumulated_changes.clear();
     }
 
     raw_log_buffer_.clear();
 }
 
+void tenet_tracer::on_module_load(const mapped_module& mod)
+{
+    if (traced_module_base_ != 0) // Already tracing a module
+    {
+        return;
+    }
+
+    // Check if the loaded module's name (or a part of it) is in our trace list
+    bool found_match = false;
+    for (const auto& traced_name : traced_modules_)
+    {
+        // Case-insensitive substring search
+        std::string mod_name_lower = mod.name;
+        std::string traced_name_lower = traced_name;
+        std::transform(mod_name_lower.begin(), mod_name_lower.end(), mod_name_lower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::transform(traced_name_lower.begin(), traced_name_lower.end(), traced_name_lower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+        if (mod_name_lower.find(traced_name_lower) != std::string::npos)
+        {
+            found_match = true;
+            break;
+        }
+    }
+
+    if (!found_match)
+    {
+        return;
+    }
+
+    win_emu_.log.info("TenetTracer: Module match found! Activating for '%s' at base 0x%llx\n", mod.name.c_str(), mod.image_base);
+
+    traced_module_base_ = mod.image_base;
+    tracing_active_ = true;
+
+    log_file_ << "mb=" << format_hex(traced_module_base_) << '\n';
+
+    setup_tracing_hooks();
+}
+
+void tenet_tracer::on_module_unload(const mapped_module& mod)
+{
+    if (mod.image_base != traced_module_base_)
+    {
+        return;
+    }
+
+    log_file_ << "mu=" << format_hex(traced_module_base_) << '\n';
+
+    tracing_active_ = false;
+    traced_module_base_ = 0;
+
+    read_hook_ = {};
+    write_hook_ = {};
+    execute_hook_ = {};
+}
+
+void tenet_tracer::setup_tracing_hooks()
+{
+    auto& emu = win_emu_.emu();
+
+    auto* read_hook = emu.hook_memory_read(0, 0xFFFFFFFFFFFFFFFF, [this](uint64_t a, const void* d, size_t s) {
+        this->log_memory_read(a, d, s);
+    });
+    read_hook_ = scoped_hook(emu, read_hook);
+
+    auto* write_hook = emu.hook_memory_write(0, 0xFFFFFFFFFFFFFFFF, [this](uint64_t a, const void* d, size_t s) {
+        this->log_memory_write(a, d, s);
+    });
+    write_hook_ = scoped_hook(emu, write_hook);
+
+    auto* execute_hook = emu.hook_memory_execution([&](uint64_t address) {
+        this->process_instruction(address);
+    });
+    execute_hook_ = scoped_hook(emu, execute_hook);
+}
+
 void tenet_tracer::log_memory_read(uint64_t address, const void* data, size_t size)
 {
-    if (!mem_read_log_.str().empty())
+    if (!tracing_active_ || !mem_read_log_.str().empty())
     {
         mem_read_log_ << ";";
     }
@@ -193,7 +286,7 @@ void tenet_tracer::log_memory_read(uint64_t address, const void* data, size_t si
 
 void tenet_tracer::log_memory_write(uint64_t address, const void* data, size_t size)
 {
-    if (!mem_write_log_.str().empty())
+    if (!tracing_active_ || !mem_write_log_.str().empty())
     {
         mem_write_log_ << ";";
     }
@@ -203,6 +296,11 @@ void tenet_tracer::log_memory_write(uint64_t address, const void* data, size_t s
 
 void tenet_tracer::process_instruction(const uint64_t address)
 {
+    if (!tracing_active_)
+    {
+        return;
+    }
+
     auto& emu = win_emu_.emu();
     std::stringstream trace_line;
 
@@ -266,4 +364,21 @@ void tenet_tracer::process_instruction(const uint64_t address)
     mem_read_log_.clear();
     mem_write_log_.str("");
     mem_write_log_.clear();
+}
+
+void tenet_tracer::notify_of_existing_modules()
+{
+    win_emu_.log.info("TenetTracer: Checking all loaded modules for a match...\n");
+
+    if (traced_modules_.empty())
+    {
+        win_emu_.log.info("TenetTracer: No modules specified for tracing.\n");
+        return;
+    }
+
+    // Correctly call the modules() function to get the map.
+    for (auto const& [base, mod] : win_emu_.mod_manager.modules())
+    {
+        on_module_load(mod);
+    }
 }

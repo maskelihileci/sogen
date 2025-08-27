@@ -300,7 +300,7 @@ namespace
             {
                 // For minidumps, don't start execution automatically; just report ready state
                 win_emu.log.print(color::green, "Minidump loaded successfully. Process state ready for analysis.\n");
-                return true; // Return success without starting emulation
+                win_emu.start();
             }
             else
             {
@@ -463,7 +463,13 @@ namespace
         if (options.tenet_trace)
         {
             win_emu->log.log("Tenet Tracer enabled. Output: tenet_trace.log\n");
-            tenet_tracer.emplace(*win_emu, "tenet_trace.log");
+            tenet_tracer.emplace(*win_emu, "tenet_trace.log", options.modules);
+            
+            if (!options.minidump_path.empty())
+            {
+                win_emu->log.info("Minidump mode detected, notifying TenetTracer of existing modules...\n");
+                tenet_tracer->notify_of_existing_modules();
+            }
         }
 
         register_analysis_callbacks(context);

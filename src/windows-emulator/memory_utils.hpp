@@ -24,6 +24,11 @@ inline std::optional<nt_memory_permission> try_map_nt_to_emulator_protection(uin
 {
     memory_permission_ext ext = memory_permission_ext::none;
     // TODO: Check for invalid combinations
+    if (nt_protection & PAGE_WRITECOMBINE)
+    {
+        // The emulator does not support write-combining, so we can safely ignore this flag
+        nt_protection &= ~static_cast<uint32_t>(PAGE_WRITECOMBINE);
+    }
     if (nt_protection & PAGE_GUARD)
     {
         // Unset the guard flag so the following switch statement will still work
@@ -49,10 +54,10 @@ inline std::optional<nt_memory_permission> try_map_nt_to_emulator_protection(uin
         common = memory_permission::read | memory_permission::exec;
         break;
     case PAGE_EXECUTE_READWRITE:
+    case PAGE_EXECUTE_WRITECOPY:
         common = memory_permission::all;
         break;
     case 0:
-    case PAGE_EXECUTE_WRITECOPY:
     default:
         return std::nullopt;
     }
