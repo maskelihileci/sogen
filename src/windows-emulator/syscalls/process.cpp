@@ -1,6 +1,7 @@
 #include "../std_include.hpp"
 #include "../emulator_utils.hpp"
 #include "../syscall_utils.hpp"
+#include "../anti_debug.hpp"
 
 #include <utils/finally.hpp>
 
@@ -10,9 +11,11 @@ namespace syscalls
                                               const uint64_t process_information, const uint32_t process_information_length,
                                               const emulator_object<uint32_t> return_length)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         switch (info_class)
@@ -40,12 +43,12 @@ namespace syscalls
             });
 
         case ProcessDebugObjectHandle:
-            return handle_query<handle>(c.emu, process_information, process_information_length, return_length, [](handle& h) {
-                h = NULL_HANDLE;
-                return STATUS_PORT_NOT_SET;
-            });
+            return anti_debug::handle_ProcessDebugObjectHandle(c, process_information, process_information_length,
+                                                             return_length);
 
         case ProcessDebugFlags:
+            return anti_debug::handle_ProcessDebugFlags(c, process_information, process_information_length, return_length);
+
         case ProcessWx86Information:
         case ProcessDefaultHardErrorMode:
             return handle_query<ULONG>(c.emu, process_information, process_information_length, return_length, [&](ULONG& res) {
@@ -53,6 +56,8 @@ namespace syscalls
             });
 
         case ProcessDebugPort:
+            return anti_debug::handle_ProcessDebugPort(c, process_information, process_information_length, return_length);
+
         case ProcessDeviceMap:
             return handle_query<EmulatorTraits<Emu64>::PVOID>(c.emu, process_information, process_information_length, return_length,
                                                               [](EmulatorTraits<Emu64>::PVOID& ptr) {
@@ -144,9 +149,11 @@ namespace syscalls
     NTSTATUS handle_NtSetInformationProcess(const syscall_context& c, const handle process_handle, const uint32_t info_class,
                                             const uint64_t process_information, const uint32_t process_information_length)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         if (info_class == ProcessSchedulerSharedData                     //
@@ -240,12 +247,14 @@ namespace syscalls
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS handle_NtOpenProcessToken(const syscall_context&, const handle process_handle, const ACCESS_MASK /*desired_access*/,
+    NTSTATUS handle_NtOpenProcessToken(const syscall_context& c, const handle process_handle, const ACCESS_MASK /*desired_access*/,
                                        const emulator_object<handle> token_handle)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         token_handle.write(CURRENT_PROCESS_TOKEN);

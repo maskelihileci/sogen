@@ -3,6 +3,7 @@
 #include "cpu_context.hpp"
 #include "emulator_utils.hpp"
 #include "syscall_utils.hpp"
+#include "anti_debug.hpp"
 
 #include <numeric>
 #include <cwctype>
@@ -547,9 +548,12 @@ namespace syscalls
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS handle_NtCreateDebugObject()
+    NTSTATUS handle_NtCreateDebugObject(const syscall_context& c, const emulator_object<handle> debug_object_handle,
+                                        const ACCESS_MASK desired_access,
+                                        const emulator_object<OBJECT_ATTRIBUTES<EmulatorTraits<Emu64>>> object_attributes,
+                                        const ULONG flags)
     {
-        return STATUS_NOT_SUPPORTED;
+        return anti_debug::handle_NtCreateDebugObject(c, debug_object_handle, desired_access, object_attributes, flags);
     }
 
     NTSTATUS handle_NtAddAtomEx(const syscall_context& c, const uint64_t atom_name, const ULONG length,

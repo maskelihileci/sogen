@@ -416,7 +416,10 @@ namespace syscalls
                                     const ACCESS_MASK /*desired_access*/, const ULONG /*handle_attributes*/, const ULONG flags,
                                     const emulator_object<handle> new_thread_handle)
     {
-        if (process_handle != CURRENT_PROCESS || thread_handle.value.type != handle_types::thread)
+        if ((process_handle != CURRENT_PROCESS &&
+             (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+              process_handle.value.id != c.proc.id)) ||
+            thread_handle.value.type != handle_types::thread)
         {
             return STATUS_INVALID_HANDLE;
         }
@@ -523,9 +526,11 @@ namespace syscalls
                                      const EmulatorTraits<Emu64>::SIZE_T /*maximum_stack_size*/,
                                      const emulator_object<PS_ATTRIBUTE_LIST<EmulatorTraits<Emu64>>> attribute_list)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         const auto h = c.proc.create_thread(c.win_emu.memory, start_routine, argument, stack_size, create_flags & CREATE_SUSPENDED);

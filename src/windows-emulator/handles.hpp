@@ -22,6 +22,7 @@ struct handle_types
         window,
         timer,
         process,
+        debug_object,
     };
 };
 

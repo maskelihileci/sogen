@@ -9,6 +9,7 @@
 
 #include "exception_dispatch.hpp"
 #include "apiset/apiset.hpp"
+#include "anti_debug.hpp"
 
 #include "network/static_socket_factory.hpp"
 #include "memory_permission_ext.hpp"

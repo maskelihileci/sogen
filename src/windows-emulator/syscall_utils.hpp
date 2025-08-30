@@ -194,14 +194,6 @@ template <typename ResponseType, typename Action, typename ReturnLengthSetter>
 NTSTATUS handle_query_internal(x86_64_emulator& emu, const uint64_t buffer, const uint32_t length,
                                const ReturnLengthSetter& return_length_setter, const Action& action)
 {
-    constexpr auto required_size = sizeof(ResponseType);
-    return_length_setter(required_size);
-
-    if (length < required_size)
-    {
-        return STATUS_BUFFER_TOO_SMALL;
-    }
-
     ResponseType obj{};
     NTSTATUS result = STATUS_SUCCESS;
 
@@ -216,11 +208,18 @@ NTSTATUS handle_query_internal(x86_64_emulator& emu, const uint64_t buffer, cons
         action(obj);
     }
 
+    if (length < sizeof(ResponseType))
+    {
+        return_length_setter(sizeof(ResponseType));
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
     if (result == STATUS_SUCCESS)
     {
         emu.write_memory(buffer, obj);
     }
 
+    return_length_setter(sizeof(ResponseType));
     return result;
 }
 

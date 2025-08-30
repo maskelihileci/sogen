@@ -7,8 +7,8 @@
 #include "common/platform/kernel_mapped.hpp"
 #include "memory_utils.hpp"
 #include "cpu_context.hpp"
-
 #include <minidump/minidump.hpp>
+#include "anti_debug.hpp"
 
 namespace minidump_loader
 {
@@ -639,6 +639,20 @@ namespace minidump_loader
             if (!active_thread->last_registers.empty())
             {
                 const auto* context = reinterpret_cast<const CONTEXT64*>(active_thread->last_registers.data());
+                // Dynamically patch the GDT to make the minidump's GS selector valid.
+                // This avoids a hardware exception when restoring the context.
+                const uint16_t gs_selector = context->SegGs;
+                if (gs_selector != 0)
+                {
+                    const uint16_t gdt_index = gs_selector >> 3;
+                    win_emu.log.info("  Patching GDT index %u for GS selector 0x%X\n", gdt_index, gs_selector);
+
+                    // We use the descriptor we already created for FS/GS at index 4 (selector 0x23)
+                    // as a known-good descriptor.
+                    const uint64_t valid_descriptor = win_emu.emu().read_memory<uint64_t>(GDT_ADDR + 4 * sizeof(uint64_t));
+                    win_emu.emu().write_memory<uint64_t>(GDT_ADDR + gdt_index * sizeof(uint64_t), valid_descriptor);
+                }
+
                 cpu_context::restore(win_emu.emu(), *context);
 
                 // If the trap flag is set in the minidump's context, clear it.
@@ -812,6 +826,10 @@ namespace minidump_loader
 
             // 2. Reconstruct the memory map and content from the dump
             reconstruct_memory_state(win_emu, dump_file.get(), dump_reader.get());
+
+            // Synchronize the C++ KUSD object with the memory restored from the minidump
+            win_emu.log.info("Synchronizing KUSD object from emulated memory...\n");
+            win_emu.memory.read_memory(kusd_mmio::address(), &win_emu.process.kusd.get(), sizeof(KUSER_SHARED_DATA64));
 
             // 3. Reconstruct modules from memory and resolve critical ntdll functions
             reconstruct_module_state(win_emu, dump_file.get());

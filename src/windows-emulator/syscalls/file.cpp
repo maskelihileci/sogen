@@ -1,6 +1,7 @@
 #include "../std_include.hpp"
 #include "../emulator_utils.hpp"
 #include "../syscall_utils.hpp"
+#include "../anti_debug.hpp"
 #include "utils/io.hpp"
 #include "../devices/console_driver.hpp"
 
@@ -881,11 +882,13 @@ namespace syscalls
                                  uint64_t ea_buffer, ULONG ea_length)
     {
         const auto attributes = object_attributes.read();
-        auto filename = read_unicode_string(c.emu, attributes.ObjectName);
+        auto filename_str = read_unicode_string(c.emu, attributes.ObjectName);
+        auto filename = anti_debug::normalize_path(c, filename_str);
         
         c.win_emu.log.info("NtCreateFile called with filename: %s\n", u16_to_u8(filename).c_str());
 
-        if (console_driver::parse_path(filename).has_value())
+        const auto console_type = console_driver::parse_path(filename);
+        if (console_type.has_value())
         {
             const io_device_creation_data data{
                 .buffer = ea_buffer,

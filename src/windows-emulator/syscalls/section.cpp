@@ -1,6 +1,7 @@
 #include "../std_include.hpp"
 #include "../emulator_utils.hpp"
 #include "../syscall_utils.hpp"
+#include "../anti_debug.hpp"
 
 #include <utils/io.hpp>
 
@@ -124,11 +125,13 @@ namespace syscalls
                                        const emulator_object<EMULATOR_CAST(EmulatorTraits<Emu64>::SIZE_T, SIZE_T)> view_size,
                                        const SECTION_INHERIT /*inherit_disposition*/, const ULONG /*allocation_type*/,
                                        const ULONG /*win32_protect*/)
-    {
-        if (process_handle != CURRENT_PROCESS)
-        {
-            return STATUS_INVALID_HANDLE;
-        }
+   {
+       if (process_handle != CURRENT_PROCESS &&
+           (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            process_handle.value.id != c.proc.id))
+       {
+           return STATUS_INVALID_HANDLE;
+       }
 
         if (section_handle == SHARED_SECTION)
         {
@@ -255,9 +258,11 @@ namespace syscalls
 
     NTSTATUS handle_NtUnmapViewOfSection(const syscall_context& c, const handle process_handle, const uint64_t base_address)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         if (!base_address)

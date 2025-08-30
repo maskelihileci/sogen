@@ -10,9 +10,11 @@ namespace syscalls
                                          const uint32_t info_class, const uint64_t memory_information,
                                          const uint64_t memory_information_length, const emulator_object<uint64_t> return_length)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         if (info_class == MemoryWorkingSetExInformation || info_class == MemoryImageExtensionInformation)
@@ -128,9 +130,11 @@ namespace syscalls
                                            const emulator_object<uint64_t> base_address, const emulator_object<uint32_t> bytes_to_protect,
                                            const uint32_t protection, const emulator_object<uint32_t> old_protection)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         const auto orig_start = base_address.read();
@@ -173,9 +177,11 @@ namespace syscalls
                                               const emulator_object<uint64_t> bytes_to_allocate, const uint32_t allocation_type,
                                               const uint32_t page_protection)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         auto allocation_bytes = bytes_to_allocate.read();
@@ -239,9 +245,11 @@ namespace syscalls
     NTSTATUS handle_NtFreeVirtualMemory(const syscall_context& c, const handle process_handle, const emulator_object<uint64_t> base_address,
                                         const emulator_object<uint64_t> bytes_to_allocate, const uint32_t free_type)
     {
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         if (free_type == 0)
@@ -273,9 +281,11 @@ namespace syscalls
     {
         number_of_bytes_read.write(0);
 
-        if (process_handle != CURRENT_PROCESS)
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
         {
-            return STATUS_NOT_SUPPORTED;
+            return STATUS_INVALID_HANDLE;
         }
 
         std::vector<uint8_t> memory{};
