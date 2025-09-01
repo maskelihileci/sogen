@@ -32,6 +32,7 @@ struct emulator_callbacks : process_context::callbacks
 
     opt_func<void()> on_rdtsc{};
     opt_func<void()> on_rdtscp{};
+    opt_func<void(uint64_t address, const void* data, size_t size)> on_syscall_memory_write{};
     opt_func<continuation(uint32_t syscall_id, std::string_view syscall_name)> on_syscall{};
     opt_func<void(std::string_view data)> on_stdout{};
     opt_func<void(std::string_view type, std::u16string_view name)> on_generic_access{};

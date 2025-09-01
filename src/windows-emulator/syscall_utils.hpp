@@ -191,7 +191,7 @@ void write_attribute(emulator& emu, const PS_ATTRIBUTE<Traits>& attribute, const
 }
 
 template <typename ResponseType, typename Action, typename ReturnLengthSetter>
-NTSTATUS handle_query_internal(x86_64_emulator& emu, const uint64_t buffer, const uint32_t length,
+NTSTATUS handle_query_internal(const syscall_context& c, const uint64_t buffer, const uint32_t length,
                                const ReturnLengthSetter& return_length_setter, const Action& action)
 {
     ResponseType obj{};
@@ -216,7 +216,11 @@ NTSTATUS handle_query_internal(x86_64_emulator& emu, const uint64_t buffer, cons
 
     if (result == STATUS_SUCCESS)
     {
-        emu.write_memory(buffer, obj);
+        c.emu.write_memory(buffer, obj);
+        if (c.win_emu.callbacks.on_syscall_memory_write)
+        {
+            c.win_emu.callbacks.on_syscall_memory_write(buffer, &obj, sizeof(ResponseType));
+        }
     }
 
     return_length_setter(sizeof(ResponseType));
@@ -225,7 +229,7 @@ NTSTATUS handle_query_internal(x86_64_emulator& emu, const uint64_t buffer, cons
 
 template <typename ResponseType, typename Action, typename LengthType>
     requires(std::is_integral_v<LengthType>)
-NTSTATUS handle_query(x86_64_emulator& emu, const uint64_t buffer, const uint32_t length, const emulator_object<LengthType> return_length,
+NTSTATUS handle_query(const syscall_context& c, const uint64_t buffer, const uint32_t length, const emulator_object<LengthType> return_length,
                       const Action& action)
 {
     const auto length_setter = [&](const size_t required_size) {
@@ -235,11 +239,32 @@ NTSTATUS handle_query(x86_64_emulator& emu, const uint64_t buffer, const uint32_
         }
     };
 
-    return handle_query_internal<ResponseType>(emu, buffer, length, length_setter, action);
+    return handle_query_internal<ResponseType>(c, buffer, length, length_setter, action);
+}
+
+// Helper to write memory and trigger the tenet_tracer callback consistently.
+template <typename T>
+void write_memory_with_callback(const syscall_context& c, uint64_t address, const T& value)
+{
+    c.emu.write_memory(address, value);
+    if (c.win_emu.callbacks.on_syscall_memory_write)
+    {
+        c.win_emu.callbacks.on_syscall_memory_write(address, &value, sizeof(T));
+    }
+}
+
+// Overload for raw pointers and sizes.
+inline void write_memory_with_callback(const syscall_context& c, uint64_t address, const void* data, size_t size)
+{
+    c.emu.write_memory(address, data, size);
+    if (c.win_emu.callbacks.on_syscall_memory_write)
+    {
+        c.win_emu.callbacks.on_syscall_memory_write(address, data, size);
+    }
 }
 
 template <typename ResponseType, typename Action>
-NTSTATUS handle_query(x86_64_emulator& emu, const uint64_t buffer, const uint32_t length,
+NTSTATUS handle_query(const syscall_context& c, const uint64_t buffer, const uint32_t length,
                       const emulator_object<IO_STATUS_BLOCK<EmulatorTraits<Emu64>>> io_status_block, const Action& action)
 {
     IO_STATUS_BLOCK<EmulatorTraits<Emu64>> status_block{};
@@ -248,7 +273,7 @@ NTSTATUS handle_query(x86_64_emulator& emu, const uint64_t buffer, const uint32_
         status_block.Information = required_size; //
     };
 
-    status_block.Status = handle_query_internal<ResponseType>(emu, buffer, length, length_setter, action);
+    status_block.Status = handle_query_internal<ResponseType>(c, buffer, length, length_setter, action);
 
     if (io_status_block)
     {

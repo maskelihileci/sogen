@@ -77,7 +77,7 @@ namespace syscalls
             const emulator_object<KEY_NAME_INFORMATION> info_obj{c.emu, key_information};
             info_obj.write(info);
 
-            c.emu.write_memory(key_information + offsetof(KEY_NAME_INFORMATION, Name), key_name.data(), info.NameLength);
+            write_memory_with_callback(c, key_information + offsetof(KEY_NAME_INFORMATION, Name), key_name.data(), info.NameLength);
 
             return STATUS_SUCCESS;
         }
@@ -151,7 +151,7 @@ namespace syscalls
 
             if (base_size <= length)
             {
-                c.emu.write_memory(key_value_information, &info, base_size);
+                write_memory_with_callback(c, key_value_information, &info, base_size);
             }
 
             if (required_size > length)
@@ -159,7 +159,7 @@ namespace syscalls
                 return STATUS_BUFFER_OVERFLOW;
             }
 
-            c.emu.write_memory(key_value_information + base_size, original_name.data(), info.NameLength);
+            write_memory_with_callback(c, key_value_information + base_size, original_name.data(), info.NameLength);
 
             return STATUS_SUCCESS;
         }
@@ -177,7 +177,7 @@ namespace syscalls
 
             if (base_size <= length)
             {
-                c.emu.write_memory(key_value_information, &info, base_size);
+                write_memory_with_callback(c, key_value_information, &info, base_size);
             }
 
             if (required_size > length)
@@ -185,7 +185,7 @@ namespace syscalls
                 return STATUS_BUFFER_OVERFLOW;
             }
 
-            c.emu.write_memory(key_value_information + base_size, value->data.data(), value->data.size());
+            write_memory_with_callback(c, key_value_information + base_size, value->data.data(), value->data.size());
 
             return STATUS_SUCCESS;
         }
@@ -206,7 +206,7 @@ namespace syscalls
 
             if (base_size <= length)
             {
-                c.emu.write_memory(key_value_information, &info, base_size);
+                write_memory_with_callback(c, key_value_information, &info, base_size);
             }
 
             if (required_size > length)
@@ -214,9 +214,10 @@ namespace syscalls
                 return STATUS_BUFFER_OVERFLOW;
             }
 
-            c.emu.write_memory(key_value_information + base_size, original_name.data(), info.NameLength);
+            write_memory_with_callback(c, key_value_information + base_size, original_name.data(), info.NameLength);
 
-            c.emu.write_memory(key_value_information + base_size + info.NameLength, value->data.data(), value->data.size());
+            write_memory_with_callback(c, key_value_information + base_size + info.NameLength, value->data.data(),
+                                       value->data.size());
 
             return STATUS_SUCCESS;
         }
@@ -283,7 +284,7 @@ namespace syscalls
 
             if (base_size <= length)
             {
-                c.emu.write_memory(key_information, &info, base_size);
+                write_memory_with_callback(c, key_information, &info, base_size);
             }
 
             if (required_size > length)
@@ -291,7 +292,7 @@ namespace syscalls
                 return STATUS_BUFFER_OVERFLOW;
             }
 
-            c.emu.write_memory(key_information + base_size, subkey_name_u16.data(), name_size);
+            write_memory_with_callback(c, key_information + base_size, subkey_name_u16.data(), name_size);
 
             return STATUS_SUCCESS;
         }
@@ -313,7 +314,7 @@ namespace syscalls
 
             if (base_size <= length)
             {
-                c.emu.write_memory(key_information, &info, base_size);
+                write_memory_with_callback(c, key_information, &info, base_size);
             }
 
             if (required_size > length)
@@ -321,7 +322,7 @@ namespace syscalls
                 return STATUS_BUFFER_OVERFLOW;
             }
 
-            c.emu.write_memory(key_information + base_size, subkey_name_u16.data(), name_size);
+            write_memory_with_callback(c, key_information + base_size, subkey_name_u16.data(), name_size);
             // TODO: Write Class Name
 
             return STATUS_SUCCESS;
@@ -363,7 +364,7 @@ namespace syscalls
 
             if (base_size <= length)
             {
-                c.emu.write_memory(key_value_information, &info, base_size);
+                write_memory_with_callback(c, key_value_information, &info, base_size);
             }
 
             if (required_size > length)
@@ -371,7 +372,7 @@ namespace syscalls
                 return STATUS_BUFFER_OVERFLOW;
             }
 
-            c.emu.write_memory(key_value_information + base_size, value_name_u16.data(), name_size);
+            write_memory_with_callback(c, key_value_information + base_size, value_name_u16.data(), name_size);
 
             return STATUS_SUCCESS;
         }
@@ -390,7 +391,7 @@ namespace syscalls
 
             if (base_size <= length)
             {
-                c.emu.write_memory(key_value_information, &info, base_size);
+                write_memory_with_callback(c, key_value_information, &info, base_size);
             }
 
             if (required_size > length)
@@ -398,7 +399,7 @@ namespace syscalls
                 return STATUS_BUFFER_OVERFLOW;
             }
 
-            c.emu.write_memory(key_value_information + base_size, value->data.data(), data_size);
+            write_memory_with_callback(c, key_value_information + base_size, value->data.data(), data_size);
 
             return STATUS_SUCCESS;
         }
@@ -422,7 +423,7 @@ namespace syscalls
 
             if (base_size <= length)
             {
-                c.emu.write_memory(key_value_information, &info, base_size);
+                write_memory_with_callback(c, key_value_information, &info, base_size);
             }
 
             if (required_size > length)
@@ -430,9 +431,9 @@ namespace syscalls
                 return STATUS_BUFFER_OVERFLOW;
             }
 
-            c.emu.write_memory(key_value_information + base_size, value_name_u16.data(), name_size);
+            write_memory_with_callback(c, key_value_information + base_size, value_name_u16.data(), name_size);
 
-            c.emu.write_memory(key_value_information + data_offset, value->data.data(), data_size);
+            write_memory_with_callback(c, key_value_information + data_offset, value->data.data(), data_size);
 
             return STATUS_SUCCESS;
         }

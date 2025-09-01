@@ -26,19 +26,19 @@ namespace syscalls
             return STATUS_NOT_SUPPORTED;
 
         case ProcessWow64Information:
-            return handle_query<ULONG>(c.emu, process_information, process_information_length, return_length,
+            return handle_query<ULONG>(c, process_information, process_information_length, return_length,
                                        [&](ULONG& info) {
                                            info = 3;
                                        });
 
         case ProcessTimes:
-            return handle_query<KERNEL_USER_TIMES>(c.emu, process_information, process_information_length, return_length,
+            return handle_query<KERNEL_USER_TIMES>(c, process_information, process_information_length, return_length,
                                                    [](KERNEL_USER_TIMES& t) {
                                                        t = {}; //
                                                    });
 
         case ProcessCookie:
-            return handle_query<uint32_t>(c.emu, process_information, process_information_length, return_length, [](uint32_t& cookie) {
+            return handle_query<uint32_t>(c, process_information, process_information_length, return_length, [](uint32_t& cookie) {
                 cookie = 0x01234567; //
             });
 
@@ -51,7 +51,7 @@ namespace syscalls
 
         case ProcessWx86Information:
         case ProcessDefaultHardErrorMode:
-            return handle_query<ULONG>(c.emu, process_information, process_information_length, return_length, [&](ULONG& res) {
+            return handle_query<ULONG>(c, process_information, process_information_length, return_length, [&](ULONG& res) {
                 res = (info_class == ProcessDebugFlags ? 1 : 0); //
             });
 
@@ -59,26 +59,29 @@ namespace syscalls
             return anti_debug::handle_ProcessDebugPort(c, process_information, process_information_length, return_length);
 
         case ProcessDeviceMap:
-            return handle_query<EmulatorTraits<Emu64>::PVOID>(c.emu, process_information, process_information_length, return_length,
+            return handle_query<EmulatorTraits<Emu64>::PVOID>(c, process_information, process_information_length, return_length,
                                                               [](EmulatorTraits<Emu64>::PVOID& ptr) {
                                                                   ptr = 0; //
                                                               });
 
         case ProcessEnableAlignmentFaultFixup:
-            return handle_query<BOOLEAN>(c.emu, process_information, process_information_length, return_length, [](BOOLEAN& b) {
+            return handle_query<BOOLEAN>(c, process_information, process_information_length, return_length, [](BOOLEAN& b) {
                 b = FALSE; //
             });
 
         case ProcessBasicInformation:
-            return handle_query<PROCESS_BASIC_INFORMATION64>(c.emu, process_information, process_information_length, return_length,
+            return handle_query<PROCESS_BASIC_INFORMATION64>(c, process_information, process_information_length, return_length,
                                                              [&](PROCESS_BASIC_INFORMATION64& basic_info) {
                                                                  basic_info.PebBaseAddress = c.proc.peb.value();
                                                                  basic_info.UniqueProcessId = 1;
                                                              });
 
+        case ProcessIoCounters:
+            return anti_debug::handle_ProcessIoCounters(c, process_information, process_information_length, return_length);
+
         case ProcessImageInformation:
             return handle_query<SECTION_IMAGE_INFORMATION<EmulatorTraits<Emu64>>>(
-                c.emu, process_information, process_information_length, return_length,
+                c, process_information, process_information_length, return_length,
                 [&](SECTION_IMAGE_INFORMATION<EmulatorTraits<Emu64>>& i) {
                     const auto& mod = *c.win_emu.mod_manager.executable;
 
@@ -129,7 +132,7 @@ namespace syscalls
             info.access([&](UNICODE_STRING<EmulatorTraits<Emu64>>& str) {
                 const auto buffer_start = static_cast<uint64_t>(process_information) + sizeof(UNICODE_STRING<EmulatorTraits<Emu64>>);
                 const auto string = read_unicode_string(c.emu, params.ImagePathName);
-                c.emu.write_memory(buffer_start, string.c_str(), (string.size() + 1) * 2);
+                write_memory_with_callback(c, buffer_start, string.c_str(), (string.size() + 1) * 2);
                 str.Length = params.ImagePathName.Length;
                 str.MaximumLength = str.Length;
                 str.Buffer = buffer_start;
@@ -213,7 +216,7 @@ namespace syscalls
                         const auto tls_entry_ptr = tls_vector + (tls_info.TlsIndex * ptr_size);
 
                         const auto old_entry = c.emu.read_memory<EmulatorTraits<Emu64>::PVOID>(tls_entry_ptr);
-                        c.emu.write_memory<EmulatorTraits<Emu64>::PVOID>(tls_entry_ptr, entry.TlsModulePointer);
+                        write_memory_with_callback<EmulatorTraits<Emu64>::PVOID>(c, tls_entry_ptr, entry.TlsModulePointer);
 
                         entry.TlsModulePointer = old_entry;
                     }
@@ -224,7 +227,7 @@ namespace syscalls
                         for (uint32_t index = 0; index < tls_info.TlsVectorLength; ++index)
                         {
                             const auto old_entry = c.emu.read_memory<uint64_t>(tls_vector + index * ptr_size);
-                            c.emu.write_memory(new_tls_vector + index * ptr_size, old_entry);
+                            write_memory_with_callback(c, new_tls_vector + index * ptr_size, old_entry);
                         }
 
                         teb.ThreadLocalStoragePointer = new_tls_vector;

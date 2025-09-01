@@ -114,7 +114,7 @@ namespace syscalls
 
             const auto teb_info = c.emu.read_memory<THREAD_TEB_INFORMATION>(thread_information);
             const auto data = c.emu.read_memory(thread->teb->value() + teb_info.TebOffset, teb_info.BytesToRead);
-            c.emu.write_memory(teb_info.TebInformation, data.data(), data.size());
+            write_memory_with_callback(c, teb_info.TebInformation, data.data(), data.size());
 
             return STATUS_SUCCESS;
         }

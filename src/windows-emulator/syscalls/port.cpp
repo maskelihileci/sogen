@@ -22,7 +22,7 @@ namespace syscalls
         {
             std::vector<uint8_t> zero_mem{};
             zero_mem.resize(connection_info_length.read(), 0);
-            c.emu.write_memory(connection_info, zero_mem.data(), zero_mem.size());
+            write_memory_with_callback(c, connection_info, zero_mem.data(), zero_mem.size());
         }
 
         client_shared_memory.access([&](PORT_VIEW64& view) {
@@ -80,7 +80,7 @@ namespace syscalls
             const auto base = dest.Base;
 
             const auto value = base + 0x10;
-            c.emu.write_memory(base + 8, &value, sizeof(value));
+            write_memory_with_callback(c, base + 8, &value, sizeof(value));
         }
         catch (...)
         {

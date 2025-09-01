@@ -142,7 +142,7 @@ namespace syscalls
         switch (fs_information_class)
         {
         case FileFsDeviceInformation:
-            return handle_query<FILE_FS_DEVICE_INFORMATION>(c.emu, fs_information, length, io_status_block,
+            return handle_query<FILE_FS_DEVICE_INFORMATION>(c, fs_information, length, io_status_block,
                                                             [&](FILE_FS_DEVICE_INFORMATION& info) {
                                                                 info.DeviceType = FILE_DEVICE_DISK;
                                                                 info.Characteristics = 0x20020;
@@ -159,7 +159,7 @@ namespace syscalls
                                                             });
 
         case FileFsSizeInformation:
-            return handle_query<FILE_FS_SIZE_INFORMATION>(c.emu, fs_information, length, io_status_block,
+            return handle_query<FILE_FS_SIZE_INFORMATION>(c, fs_information, length, io_status_block,
                                                           [&](FILE_FS_SIZE_INFORMATION& info) {
                                                               info.BytesPerSector = 0x1000;
                                                               info.SectorsPerAllocationUnit = 0x1000;
@@ -168,7 +168,7 @@ namespace syscalls
                                                           });
 
         case FileFsVolumeInformation:
-            return handle_query<FILE_FS_VOLUME_INFORMATION>(c.emu, fs_information, length, io_status_block,
+            return handle_query<FILE_FS_VOLUME_INFORMATION>(c, fs_information, length, io_status_block,
                                                             [&](FILE_FS_VOLUME_INFORMATION&) {});
 
         default:
@@ -301,7 +301,7 @@ namespace syscalls
             object.set_address(file_information + new_offset);
             object.write(info);
 
-            c.emu.write_memory(object.value() + offsetof(T, FileName), file_name.data(), info.FileNameLength);
+            write_memory_with_callback(c, object.value() + offsetof(T, FileName), file_name.data(), info.FileNameLength);
 
             ++current_index;
             current_offset = end_offset;
@@ -415,13 +415,13 @@ namespace syscalls
                 return ret(STATUS_BUFFER_OVERFLOW);
             }
 
-            c.emu.write_memory(file_information, FILE_NAME_INFORMATION{
-                                                     .FileNameLength = static_cast<ULONG>(relative_path.size() * 2),
-                                                     .FileName = {},
-                                                 });
+            write_memory_with_callback(c, file_information, FILE_NAME_INFORMATION{
+                                                                 .FileNameLength = static_cast<ULONG>(relative_path.size() * 2),
+                                                                 .FileName = {},
+                                                             });
 
-            c.emu.write_memory(file_information + offsetof(FILE_NAME_INFORMATION, FileName), relative_path.c_str(),
-                               (relative_path.size() + 1) * 2);
+            write_memory_with_callback(c, file_information + offsetof(FILE_NAME_INFORMATION, FileName), relative_path.c_str(),
+                                       (relative_path.size() + 1) * 2);
 
             return ret(STATUS_SUCCESS);
         }
@@ -592,7 +592,7 @@ namespace syscalls
             i.ChangeTime = i.LastWriteTime;
             i.FileAttributes = (file_stat.st_mode & S_IFDIR) != 0 ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
 
-            c.emu.write_memory(file_information, i);
+            write_memory_with_callback(c, file_information, i);
 
             return ret(STATUS_SUCCESS);
         }
@@ -1230,7 +1230,7 @@ namespace syscalls
                 }
 
                 str.Length = str_length;
-                c.emu.write_memory(str.Buffer, system32.data(), max_length);
+                write_memory_with_callback(c, str.Buffer, system32.data(), max_length);
             });
 
             return too_small ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;

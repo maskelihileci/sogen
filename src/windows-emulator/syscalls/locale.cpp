@@ -18,7 +18,7 @@ namespace syscalls
 
         const auto size = static_cast<size_t>(page_align_up(locale_file.size()));
         const auto base = c.win_emu.memory.allocate_memory(size, memory_permission::read);
-        c.emu.write_memory(base, locale_file.data(), locale_file.size());
+        write_memory_with_callback(c, base, locale_file.data(), locale_file.size());
 
         base_address.write(base);
         default_locale_id.write(0x407);
@@ -47,7 +47,7 @@ namespace syscalls
 
             const auto size = static_cast<size_t>(page_align_up(locale_file.size()));
             const auto section_memory = c.win_emu.memory.allocate_memory(size, memory_permission::read);
-            c.emu.write_memory(section_memory, locale_file.data(), locale_file.size());
+            write_memory_with_callback(c, section_memory, locale_file.data(), locale_file.size());
 
             section_pointer.write_if_valid(section_memory);
             section_size.write_if_valid(static_cast<ULONG>(size));

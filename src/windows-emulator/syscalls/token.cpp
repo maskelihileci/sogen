@@ -69,7 +69,7 @@ namespace syscalls
             user.User.Sid = token_information + sizeof(TOKEN_USER64);
 
             emulator_object<TOKEN_USER64>{c.emu, token_information}.write(user);
-            c.emu.write_memory(token_information + sizeof(TOKEN_USER64), sid, sizeof(sid));
+            write_memory_with_callback(c, token_information + sizeof(TOKEN_USER64), sid, sizeof(sid));
             return STATUS_SUCCESS;
         }
 
@@ -89,7 +89,7 @@ namespace syscalls
             groups.Groups[0].Sid = token_information + sizeof(TOKEN_GROUPS64);
 
             emulator_object<TOKEN_GROUPS64>{c.emu, token_information}.write(groups);
-            c.emu.write_memory(token_information + sizeof(TOKEN_GROUPS64), sid, sizeof(sid));
+            write_memory_with_callback(c, token_information + sizeof(TOKEN_GROUPS64), sid, sizeof(sid));
             return STATUS_SUCCESS;
         }
 
@@ -107,7 +107,7 @@ namespace syscalls
             owner.Owner = token_information + sizeof(TOKEN_OWNER64);
 
             emulator_object<TOKEN_OWNER64>{c.emu, token_information}.write(owner);
-            c.emu.write_memory(token_information + sizeof(TOKEN_OWNER64), sid, sizeof(sid));
+            write_memory_with_callback(c, token_information + sizeof(TOKEN_OWNER64), sid, sizeof(sid));
             return STATUS_SUCCESS;
         }
 
@@ -125,7 +125,7 @@ namespace syscalls
             primary_group.PrimaryGroup = token_information + sizeof(TOKEN_PRIMARY_GROUP64);
 
             emulator_object<TOKEN_PRIMARY_GROUP64>{c.emu, token_information}.write(primary_group);
-            c.emu.write_memory(token_information + sizeof(TOKEN_PRIMARY_GROUP64), sid, sizeof(sid));
+            write_memory_with_callback(c, token_information + sizeof(TOKEN_PRIMARY_GROUP64), sid, sizeof(sid));
             return STATUS_SUCCESS;
         }
 
@@ -153,7 +153,7 @@ namespace syscalls
             acl.AceCount = 1;
             acl.Sbz2 = 0;
 
-            c.emu.write_memory(acl_offset, acl);
+            write_memory_with_callback(c, acl_offset, acl);
 
             const auto ace_offset = acl_offset + sizeof(ACL);
             ACCESS_ALLOWED_ACE ace{};
@@ -162,10 +162,10 @@ namespace syscalls
             ace.Header.AceSize = static_cast<USHORT>(sizeof(ACCESS_ALLOWED_ACE) + sizeof(sid) - sizeof(ULONG));
             ace.Mask = GENERIC_ALL;
 
-            c.emu.write_memory(ace_offset, ace);
+            write_memory_with_callback(c, ace_offset, ace);
 
             const auto sid_offset = ace_offset + sizeof(ACCESS_ALLOWED_ACE) - sizeof(ULONG);
-            c.emu.write_memory(sid_offset, sid, sizeof(sid));
+            write_memory_with_callback(c, sid_offset, sid, sizeof(sid));
 
             return STATUS_SUCCESS;
         }
@@ -236,9 +236,9 @@ namespace syscalls
                 return STATUS_BUFFER_TOO_SMALL;
             }
 
-            c.emu.write_memory(token_information, TOKEN_ELEVATION{
-                                                      .TokenIsElevated = 0,
-                                                  });
+            write_memory_with_callback(c, token_information, TOKEN_ELEVATION{
+                                                                  .TokenIsElevated = 0,
+                                                              });
             return STATUS_SUCCESS;
         }
 
@@ -272,7 +272,7 @@ namespace syscalls
             stats.GroupCount = 1;
             stats.PrivilegeCount = 0;
 
-            c.emu.write_memory(token_information, stats);
+            write_memory_with_callback(c, token_information, stats);
 
             return STATUS_SUCCESS;
         }
@@ -287,12 +287,12 @@ namespace syscalls
                 return STATUS_BUFFER_TOO_SMALL;
             }
 
-            c.emu.write_memory(token_information, TOKEN_SECURITY_ATTRIBUTES_INFORMATION{
-                                                      .Version = 0,
-                                                      .Reserved = {},
-                                                      .AttributeCount = 0,
-                                                      .Attribute = {},
-                                                  });
+            write_memory_with_callback(c, token_information, TOKEN_SECURITY_ATTRIBUTES_INFORMATION{
+                                                                  .Version = 0,
+                                                                  .Reserved = {},
+                                                                  .AttributeCount = 0,
+                                                                  .Attribute = {},
+                                                              });
 
             return STATUS_SUCCESS;
         }
@@ -317,7 +317,8 @@ namespace syscalls
             label.Label.Sid = token_information + sizeof(TOKEN_MANDATORY_LABEL64);
 
             emulator_object<TOKEN_MANDATORY_LABEL64>{c.emu, token_information}.write(label);
-            c.emu.write_memory(token_information + sizeof(TOKEN_MANDATORY_LABEL64), medium_integrity_sid, sizeof(medium_integrity_sid));
+            write_memory_with_callback(c, token_information + sizeof(TOKEN_MANDATORY_LABEL64), medium_integrity_sid,
+                                       sizeof(medium_integrity_sid));
             return STATUS_SUCCESS;
         }
 
@@ -331,9 +332,9 @@ namespace syscalls
                 return STATUS_BUFFER_TOO_SMALL;
             }
 
-            c.emu.write_memory(token_information, TOKEN_PROCESS_TRUST_LEVEL64{
-                                                      .TrustLevelSid = 0,
-                                                  });
+            write_memory_with_callback(c, token_information, TOKEN_PROCESS_TRUST_LEVEL64{
+                                                                  .TrustLevelSid = 0,
+                                                              });
 
             return STATUS_SUCCESS;
         }
@@ -348,10 +349,10 @@ namespace syscalls
                 return STATUS_BUFFER_TOO_SMALL;
             }
 
-            c.emu.write_memory(token_information, TOKEN_BNO_ISOLATION_INFORMATION64{
-                                                      .IsolationPrefix = 0,
-                                                      .IsolationEnabled = FALSE,
-                                                  });
+            write_memory_with_callback(c, token_information, TOKEN_BNO_ISOLATION_INFORMATION64{
+                                                                  .IsolationPrefix = 0,
+                                                                  .IsolationEnabled = FALSE,
+                                                              });
 
             return STATUS_SUCCESS;
         }

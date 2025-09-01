@@ -187,7 +187,7 @@ namespace syscalls
 
         if (object_information_class == ObjectHandleFlagInformation)
         {
-            return handle_query<OBJECT_HANDLE_FLAG_INFORMATION>(c.emu, object_information, object_information_length, return_length,
+            return handle_query<OBJECT_HANDLE_FLAG_INFORMATION>(c, object_information, object_information_length, return_length,
                                                                 [&](OBJECT_HANDLE_FLAG_INFORMATION& info) {
                                                                     info.Inherit = 0;
                                                                     info.ProtectFromClose = 0;
@@ -350,14 +350,14 @@ namespace syscalls
         if (security_information & OWNER_SECURITY_INFORMATION)
         {
             sd.Owner = current_offset;
-            c.emu.write_memory(security_descriptor + current_offset, owner_sid);
+            write_memory_with_callback(c, security_descriptor + current_offset, owner_sid);
             current_offset += sizeof(owner_sid);
         }
 
         if (security_information & GROUP_SECURITY_INFORMATION)
         {
             sd.Group = current_offset;
-            c.emu.write_memory(security_descriptor + current_offset, group_sid);
+            write_memory_with_callback(c, security_descriptor + current_offset, group_sid);
             current_offset += sizeof(group_sid);
         }
 
@@ -365,7 +365,7 @@ namespace syscalls
         {
             sd.Control |= SE_DACL_PRESENT;
             sd.Dacl = current_offset;
-            c.emu.write_memory(security_descriptor + current_offset, dacl_data);
+            write_memory_with_callback(c, security_descriptor + current_offset, dacl_data);
             current_offset += sizeof(dacl_data);
         }
 
@@ -373,13 +373,13 @@ namespace syscalls
         {
             sd.Control |= SE_SACL_PRESENT | SE_SACL_AUTO_INHERITED;
             sd.Sacl = current_offset;
-            c.emu.write_memory(security_descriptor + current_offset, sacl_data);
+            write_memory_with_callback(c, security_descriptor + current_offset, sacl_data);
             current_offset += sizeof(sacl_data);
         }
 
         assert(current_offset == total_size);
 
-        c.emu.write_memory(security_descriptor, sd);
+        write_memory_with_callback(c, security_descriptor, sd);
 
         return STATUS_SUCCESS;
     }

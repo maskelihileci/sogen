@@ -37,7 +37,7 @@ namespace anti_debug
                                              const uint32_t process_information_length,
                                              const emulator_object<uint32_t> return_length)
     {
-        return handle_query<handle>(c.emu, process_information, process_information_length, return_length,
+        return handle_query<handle>(c, process_information, process_information_length, return_length,
                                     [](handle& h) {
                                         h = NULL_HANDLE;
                                         return STATUS_PORT_NOT_SET;
@@ -47,7 +47,7 @@ namespace anti_debug
     NTSTATUS handle_ProcessDebugFlags(const syscall_context& c, const uint64_t process_information,
                                       const uint32_t process_information_length, const emulator_object<uint32_t> return_length)
     {
-        return handle_query<ULONG>(c.emu, process_information, process_information_length, return_length,
+        return handle_query<ULONG>(c, process_information, process_information_length, return_length,
                                    [&](ULONG& res) {
                                        res = 0; // Not being debugged
                                    });
@@ -57,7 +57,7 @@ namespace anti_debug
                                      const uint32_t process_information_length, const emulator_object<uint32_t> return_length)
     {
         return handle_query<EmulatorTraits<Emu64>::PVOID>(
-            c.emu, process_information, process_information_length, return_length,
+            c, process_information, process_information_length, return_length,
             [](EmulatorTraits<Emu64>::PVOID& ptr) {
                 ptr = 0; // No debug port
             });
@@ -73,5 +73,56 @@ namespace anti_debug
         (void)c;
         debug_object_handle.write(make_pseudo_handle(1, handle_types::debug_object));
         return STATUS_SUCCESS;
+    }
+    NTSTATUS handle_SystemExtendedProcessInformation(const syscall_context& c, const uint64_t system_information,
+                                                     const uint32_t system_information_length,
+                                                     const emulator_object<uint32_t> return_length)
+    {
+        // This bypasses a check that iterates a process list and compares counters.
+        const size_t required_size = sizeof(SYSTEM_PROCESS_INFORMATION);
+
+        if (return_length)
+        {
+            return_length.write(static_cast<ULONG>(required_size));
+        }
+
+        if (system_information_length < required_size)
+        {
+            return STATUS_INFO_LENGTH_MISMATCH; // 0xC0000004
+        }
+
+        SYSTEM_PROCESS_INFORMATION info{};
+        info.NextEntryOffset = 0; // Terminate the list
+        info.NumberOfThreads = static_cast<ULONG>(c.proc.threads.size());
+        if (c.proc.active_thread && c.proc.active_thread->teb.has_value())
+        {
+            info.UniqueProcessId = reinterpret_cast<HANDLE>(c.proc.active_thread->teb->read().ClientId.UniqueProcess);
+        }
+        else
+        {
+            info.UniqueProcessId = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(c.proc.id));
+        }
+        info.InheritedFromUniqueProcessId = reinterpret_cast<HANDLE>(0);
+
+
+
+        write_memory_with_callback(c, system_information, info);
+
+        return STATUS_SUCCESS;
+    }
+    NTSTATUS handle_ProcessIoCounters(const syscall_context& c, const uint64_t process_information,
+                                      const uint32_t process_information_length, const emulator_object<uint32_t> return_length)
+    {
+        return handle_query<IO_COUNTERS>(c, process_information, process_information_length, return_length,
+                                        [](IO_COUNTERS& counters) {
+                                            memset(&counters, 0, sizeof(counters));
+                                            // Set a consistent, non-zero value for the counters to match system.cpp
+                                            counters.ReadOperationCount = 0;
+                                            counters.WriteOperationCount = 0;
+                                            counters.OtherOperationCount = 0;
+                                            counters.ReadTransferCount = 0;
+                                            counters.WriteTransferCount = 0;
+                                            counters.OtherTransferCount = 0;
+                                        });
     }
 }

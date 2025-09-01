@@ -40,7 +40,18 @@ namespace
             {
                 std::string key = pair_str.substr(0, equals_pos);
                 std::string value = pair_str.substr(equals_pos + 1);
+                if (key == "mw")
+                {
+                if (!changes[key].empty())
+                {
+                changes[key] += ";";
+                }
+                changes[key] += value;
+                }
+                else
+                {
                 changes[key] = value;
+                }
             }
 
             start = end + 1;
@@ -69,6 +80,18 @@ tenet_tracer::tenet_tracer(windows_emulator& win_emu, const std::filesystem::pat
         win_emu_.callbacks.on_module_load = [this](auto& mod) { this->on_module_load(mod); };
         win_emu_.callbacks.on_module_unload = [this](auto& mod) { this->on_module_unload(mod); };
     }
+
+    win_emu_.callbacks.on_syscall_memory_write = [this](uint64_t address, const void* data, size_t size) {
+        if (!tracing_active_ || raw_log_buffer_.empty())
+        {
+            return;
+        }
+
+        std::stringstream ss;
+        ss << ",mw=" << format_hex(address) << ":" << format_byte_array(static_cast<const uint8_t*>(data), size);
+
+        raw_log_buffer_.back() += ss.str();
+    };
 }
 
 tenet_tracer::~tenet_tracer()

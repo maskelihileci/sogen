@@ -296,7 +296,7 @@ namespace syscalls
             return STATUS_INVALID_ADDRESS;
         }
 
-        c.emu.write_memory(buffer, memory.data(), memory.size());
+        write_memory_with_callback(c, buffer, memory.data(), memory.size());
         number_of_bytes_read.write(number_of_bytes_to_read);
         return STATUS_SUCCESS;
     }

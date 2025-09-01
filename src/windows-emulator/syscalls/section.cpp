@@ -142,7 +142,7 @@ namespace syscalls
             const auto windows_dir_size = windows_dir.size() * 2;
 
             constexpr auto windows_dir_offset = 0x10;
-            c.emu.write_memory(address + 8, windows_dir_offset);
+            write_memory_with_callback(c, address + 8, windows_dir_offset);
 
             // aka. BaseStaticServerData (BASE_STATIC_SERVER_DATA)
             const auto obj_address = address + windows_dir_offset;
@@ -168,10 +168,10 @@ namespace syscalls
                 ucs.Buffer = ucs.Buffer - obj_address;
             });
 
-            c.emu.write_memory(obj_address + 0x9C8, 0xFFFFFFFF); // TIME_ZONE_ID_INVALID
+            write_memory_with_callback(c, obj_address + 0x9C8, 0xFFFFFFFF); // TIME_ZONE_ID_INVALID
 
             // Windows 2019 offset!
-            c.emu.write_memory(obj_address + 0xA70, 0xFFFFFFFF); // TIME_ZONE_ID_INVALID
+            write_memory_with_callback(c, obj_address + 0xA70, 0xFFFFFFFF); // TIME_ZONE_ID_INVALID
 
             if (view_size)
             {
@@ -244,7 +244,7 @@ namespace syscalls
 
         if (!reserve_only && !file_data.empty())
         {
-            c.emu.write_memory(address, file_data.data(), file_data.size());
+            write_memory_with_callback(c, address, file_data.data(), file_data.size());
         }
 
         if (view_size)
