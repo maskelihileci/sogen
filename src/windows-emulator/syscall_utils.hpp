@@ -233,9 +233,14 @@ NTSTATUS handle_query(const syscall_context& c, const uint64_t buffer, const uin
                       const Action& action)
 {
     const auto length_setter = [&](const size_t required_size) {
-        if (return_length)
+        if (return_length) // This checks if the pointer is not null
         {
-            return_length.write(static_cast<LengthType>(required_size));
+            // We must also verify the pointer is actually writable before dereferencing.
+            char dummy;
+            if (c.win_emu.memory.try_read_memory(return_length.value(), &dummy, 1))
+            {
+                return_length.write(static_cast<LengthType>(required_size));
+            }
         }
     };
 

@@ -18,6 +18,8 @@ namespace syscalls
             return STATUS_INVALID_HANDLE;
         }
 
+        c.win_emu.log.info("NtQueryInformationProcess called with info_class: %X\n", info_class);
+
         switch (info_class)
         {
         case ProcessGroupInformation:
@@ -169,6 +171,8 @@ namespace syscalls
         {
             return STATUS_SUCCESS;
         }
+
+        if (info_class == ProcessInstrumentationCallback) {return STATUS_ACCESS_DENIED;}
 
         if (info_class == ProcessTlsInformation)
         {
