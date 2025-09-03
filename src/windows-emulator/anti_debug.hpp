@@ -87,4 +87,6 @@ struct SYSTEM_PROCESS_INFORMATION
     NTSTATUS handle_NtQueryInformationThread_ThreadHideFromDebugger(
         const syscall_context& c, const handle thread_handle, uint64_t thread_information,
         uint32_t thread_information_length, const emulator_object<uint32_t> return_length);
+
+    void handle_int2d_exception(windows_emulator& win_emu);
 }

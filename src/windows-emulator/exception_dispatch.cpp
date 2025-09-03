@@ -3,6 +3,7 @@
 #include "process_context.hpp"
 #include "cpu_context.hpp"
 #include "windows_emulator.hpp"
+#include "anti_debug.hpp"
 
 namespace
 {
@@ -204,5 +205,6 @@ void dispatch_single_step(windows_emulator& win_emu)
 
 void dispatch_breakpoint(windows_emulator& win_emu)
 {
+    anti_debug::handle_int2d_exception(win_emu);
     dispatch_exception(win_emu, STATUS_BREAKPOINT, {});
 }

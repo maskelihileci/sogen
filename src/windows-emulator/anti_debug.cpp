@@ -176,4 +176,22 @@ namespace anti_debug
 
         return STATUS_SUCCESS;
     }
+    void handle_int2d_exception(windows_emulator& win_emu)
+    {
+        const uint64_t current_ip = win_emu.current_thread().current_ip;
+        try
+        {
+            const auto instruction = win_emu.emu().read_memory<uint16_t>(current_ip);
+            if (instruction == 0x2DCD) // int 2dh
+            {
+                // On a real CPU, the IP is advanced *before* the interrupt is handled.
+                // We need to replicate this behavior to avoid an infinite loop.
+                win_emu.current_thread().current_ip += 2;
+            }
+        }
+        catch (const std::exception&)
+        {
+            // Failed to read, proceed with normal breakpoint dispatch.
+        }
+    }
 }
