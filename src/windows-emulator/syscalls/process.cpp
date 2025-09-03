@@ -161,7 +161,8 @@ namespace syscalls
             return STATUS_INVALID_HANDLE;
         }
 
-        if (info_class == ProcessSchedulerSharedData                     //
+        if (info_class == ProcessBreakOnTermination                      //
+            || info_class == ProcessSchedulerSharedData                  //
             || info_class == ProcessConsoleHostProcess                   //
             || info_class == ProcessFaultInformation                     //
             || info_class == ProcessDefaultHardErrorMode                 //

@@ -86,6 +86,7 @@ class emulator_thread : public ref_counted_object
     bool alerted{false};
     uint32_t suspended{0};
     std::optional<std::chrono::steady_clock::time_point> await_time{};
+    bool is_hidden_from_debugger{false};
 
     bool apc_alertable{false};
     std::vector<pending_apc> pending_apcs{};
@@ -161,6 +162,7 @@ class emulator_thread : public ref_counted_object
 
         buffer.write(this->suspended);
         buffer.write_optional(this->await_time);
+        buffer.write(this->is_hidden_from_debugger);
 
         buffer.write(this->apc_alertable);
         buffer.write_vector(this->pending_apcs);
@@ -201,6 +203,7 @@ class emulator_thread : public ref_counted_object
 
         buffer.read(this->suspended);
         buffer.read_optional(this->await_time);
+        buffer.read(this->is_hidden_from_debugger);
 
         buffer.read(this->apc_alertable);
         buffer.read_vector(this->pending_apcs);

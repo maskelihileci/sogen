@@ -2,6 +2,7 @@
 #include "../cpu_context.hpp"
 #include "../emulator_utils.hpp"
 #include "../syscall_utils.hpp"
+#include "../anti_debug.hpp"
 
 #include <utils/finally.hpp>
 
@@ -17,6 +18,8 @@ namespace syscalls
             return STATUS_INVALID_HANDLE;
         }
 
+        c.win_emu.log.info("NtSetInformationThread called with info_class: %X\n", info_class);
+
         if (info_class == ThreadSchedulerSharedDataSlot || info_class == ThreadBasePriority || info_class == ThreadAffinityMask)
         {
             return STATUS_SUCCESS;
@@ -24,8 +27,8 @@ namespace syscalls
 
         if (info_class == ThreadHideFromDebugger)
         {
-            c.win_emu.callbacks.on_suspicious_activity("Hiding thread from debugger");
-            return STATUS_SUCCESS;
+            return anti_debug::handle_NtSetInformationThread_ThreadHideFromDebugger(c, thread_handle, thread_information,
+                                                                                     thread_information_length);
         }
 
         if (info_class == ThreadNameInformation)
@@ -99,6 +102,8 @@ namespace syscalls
         {
             return STATUS_INVALID_HANDLE;
         }
+
+        c.win_emu.log.info("NtQueryInformationThread called with info_class: %X\n", info_class);
 
         if (info_class == ThreadTebInformation)
         {
@@ -196,20 +201,8 @@ namespace syscalls
 
         if (info_class == ThreadHideFromDebugger)
         {
-            if (return_length)
-            {
-                return_length.write(sizeof(BOOLEAN));
-            }
-
-            if (thread_information_length < sizeof(BOOLEAN))
-            {
-                return STATUS_BUFFER_OVERFLOW;
-            }
-
-            const emulator_object<BOOLEAN> info{c.emu, thread_information};
-            info.write(0);
-
-            return STATUS_SUCCESS;
+            return anti_debug::handle_NtQueryInformationThread_ThreadHideFromDebugger(
+                c, thread_handle, thread_information, thread_information_length, return_length);
         }
 
         if (info_class == ThreadTimes)

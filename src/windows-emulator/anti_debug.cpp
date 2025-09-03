@@ -50,6 +50,7 @@ namespace anti_debug
         return handle_query<ULONG>(c, process_information, process_information_length, return_length,
                                    [&](ULONG& res) {
                                        res = 0; // Not being debugged
+                                       return STATUS_PORT_NOT_SET;
                                    });
     }
 
@@ -124,5 +125,55 @@ namespace anti_debug
                                             counters.WriteTransferCount = 0;
                                             counters.OtherTransferCount = 0;
                                         });
+   }
+   NTSTATUS handle_NtSetInformationThread_ThreadHideFromDebugger(
+        const syscall_context& c, const handle thread_handle, const uint64_t thread_information,
+        const uint32_t thread_information_length)
+    {
+        auto* thread = thread_handle == CURRENT_THREAD ? c.proc.active_thread : c.proc.threads.get(thread_handle);
+        if (!thread)
+        {
+            return STATUS_INVALID_HANDLE;
+        }
+
+        if (thread_information != 0 || thread_information_length != 0)
+        {
+            return STATUS_INFO_LENGTH_MISMATCH;
+        }
+
+        thread->is_hidden_from_debugger = true;
+        c.win_emu.callbacks.on_suspicious_activity("Hiding thread from debugger");
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS handle_NtQueryInformationThread_ThreadHideFromDebugger(
+        const syscall_context& c, const handle thread_handle, const uint64_t thread_information,
+        const uint32_t thread_information_length, const emulator_object<uint32_t> return_length)
+    {
+        const auto* thread = thread_handle == CURRENT_THREAD ? c.proc.active_thread : c.proc.threads.get(thread_handle);
+        if (!thread)
+        {
+            return STATUS_INVALID_HANDLE;
+        }
+        
+        if (thread_information % 4 != 0)
+        {
+            return STATUS_DATATYPE_MISALIGNMENT;
+        }
+
+        if (thread_information_length != sizeof(BOOLEAN))
+        {
+            return STATUS_INFO_LENGTH_MISMATCH;
+        }
+
+        if (return_length)
+        {
+            return_length.write(sizeof(BOOLEAN));
+        }
+
+        const emulator_object<BOOLEAN> info{c.emu, thread_information};
+        info.write(thread->is_hidden_from_debugger);
+
+        return STATUS_SUCCESS;
     }
 }
