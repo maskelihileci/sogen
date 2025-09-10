@@ -226,7 +226,8 @@ bool memory_manager::protect_memory(const uint64_t address, const size_t size, c
                 old_first_permissions = sub_region.second.permissions;
             }
 
-            this->apply_memory_protection(sub_region.first, sub_region.second.length, permissions);
+            this->apply_memory_protection(sub_region.first, sub_region.second.length,
+                                          permissions.is_guarded() ? memory_permission::none : permissions.common);
             sub_region.second.permissions = permissions;
         }
     }
@@ -331,7 +332,8 @@ bool memory_manager::commit_memory(const uint64_t address, const size_t size, co
 
             if (map_length > 0)
             {
-                this->map_memory(map_start, static_cast<size_t>(map_length), permissions);
+                this->map_memory(map_start, static_cast<size_t>(map_length),
+                                 permissions.is_guarded() ? memory_permission::none : permissions.common);
                 committed_regions[map_start] = committed_region{static_cast<size_t>(map_length), permissions};
             }
 
@@ -345,7 +347,8 @@ bool memory_manager::commit_memory(const uint64_t address, const size_t size, co
         const auto map_start = last_region ? (last_region_start + last_region->length) : address;
         const auto map_length = end - map_start;
 
-        this->map_memory(map_start, static_cast<size_t>(map_length), permissions);
+        this->map_memory(map_start, static_cast<size_t>(map_length),
+                         permissions.is_guarded() ? memory_permission::none : permissions.common);
         committed_regions[map_start] = committed_region{static_cast<size_t>(map_length), permissions};
     }
 
