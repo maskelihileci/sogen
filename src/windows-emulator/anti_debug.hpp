@@ -4,6 +4,8 @@
 #include "windows_objects.hpp"
 #include "syscall_utils.hpp"
 
+#define STATUS_NO_YIELD_PERFORMED 0x40000024
+
 namespace anti_debug
 {
 
@@ -83,6 +85,8 @@ struct SYSTEM_PROCESS_INFORMATION
                                       uint32_t process_information_length, const emulator_object<uint32_t> return_length);
     NTSTATUS handle_NtSetInformationThread_ThreadHideFromDebugger(
         const syscall_context& c, const handle thread_handle, uint64_t thread_information, uint32_t thread_information_length);
+
+    NTSTATUS handle_NtYieldExecution();
 
     NTSTATUS handle_NtQueryInformationThread_ThreadHideFromDebugger(
         const syscall_context& c, const handle thread_handle, uint64_t thread_information,

@@ -176,6 +176,13 @@ namespace anti_debug
 
         return STATUS_SUCCESS;
     }
+
+    NTSTATUS handle_NtYieldExecution()
+    {
+        return STATUS_NO_YIELD_PERFORMED;
+    }
+
+
     void handle_int2d_exception(windows_emulator& win_emu)
     {
         const uint64_t current_ip = win_emu.current_thread().current_ip;

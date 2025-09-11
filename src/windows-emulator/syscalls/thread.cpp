@@ -348,7 +348,7 @@ namespace syscalls
     NTSTATUS handle_NtYieldExecution(const syscall_context& c)
     {
         c.win_emu.yield_thread();
-        return STATUS_SUCCESS;
+        return anti_debug::handle_NtYieldExecution();
     }
 
     NTSTATUS handle_NtResumeThread(const syscall_context& c, const handle thread_handle,
