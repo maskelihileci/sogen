@@ -89,4 +89,5 @@ struct SYSTEM_PROCESS_INFORMATION
         uint32_t thread_information_length, const emulator_object<uint32_t> return_length);
 
     void handle_int2d_exception(windows_emulator& win_emu);
+    void ObjectTypeInformation(const syscall_context& c, const handle object_handle, OBJECT_TYPE_INFORMATION& info);
 }

@@ -198,7 +198,12 @@ class emulator_allocator
           active_address_(address)
     {
     }
-
+ 
+    void align(const uint64_t alignment)
+    {
+        this->active_address_ = align_up(this->active_address_, alignment);
+    }
+ 
     uint64_t reserve(const uint64_t count, const uint64_t alignment = 1)
     {
         const auto potential_start = align_up(this->active_address_, alignment);

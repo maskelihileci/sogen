@@ -1,7 +1,9 @@
 #include "../std_include.hpp"
+#include <platform/kernel_mapped.hpp>
 #include "../emulator_utils.hpp"
 #include "../syscall_utils.hpp"
-
+#include "../anti_debug.hpp"
+ 
 namespace syscalls
 {
     NTSTATUS handle_NtClose(const syscall_context& c, const handle h)
@@ -114,11 +116,12 @@ namespace syscalls
     }
 
     NTSTATUS handle_NtQueryObject(const syscall_context& c, const handle handle, const OBJECT_INFORMATION_CLASS object_information_class,
-                                  const emulator_pointer object_information, const ULONG object_information_length,
-                                  const emulator_object<ULONG> return_length)
+                                const emulator_pointer object_information, const ULONG object_information_length,
+                                const emulator_object<ULONG> return_length)
     {
-        if (object_information_class == ObjectNameInformation)
+        switch (object_information_class)
         {
+        case ObjectNameInformation: {
             std::u16string device_path;
             switch (handle.value.type)
             {
@@ -128,7 +131,6 @@ namespace syscalls
                 {
                     return STATUS_INVALID_HANDLE;
                 }
-
                 device_path = windows_path(file->name).to_device_path();
                 break;
             }
@@ -138,7 +140,6 @@ namespace syscalls
                 {
                     return STATUS_INVALID_HANDLE;
                 }
-
                 device_path = device->get_device_path();
                 break;
             }
@@ -163,10 +164,8 @@ namespace syscalls
             return STATUS_SUCCESS;
         }
 
-        if (object_information_class == ObjectTypeInformation)
-        {
+        case ObjectTypeInformation: {
             const auto name = get_type_name(static_cast<handle_types::type>(handle.value.type));
-
             const auto required_size = sizeof(OBJECT_TYPE_INFORMATION) + (name.size() + 1) * 2;
 
             if (required_size > object_information_length)
@@ -178,25 +177,66 @@ namespace syscalls
             emulator_allocator allocator(c.emu, object_information, object_information_length);
             const auto info = allocator.reserve<OBJECT_TYPE_INFORMATION>();
             info.access([&](OBJECT_TYPE_INFORMATION& i) {
-                allocator.make_unicode_string(i.TypeName, name); //
+            allocator.make_unicode_string(i.TypeName, name);
+            anti_debug::ObjectTypeInformation(c, handle, i);
             });
 
             return_length.write_if_valid(static_cast<ULONG>(required_size));
             return STATUS_SUCCESS;
         }
 
-        if (object_information_class == ObjectHandleFlagInformation)
-        {
+        case ObjectHandleFlagInformation:
             return handle_query<OBJECT_HANDLE_FLAG_INFORMATION>(c, object_information, object_information_length, return_length,
                                                                 [&](OBJECT_HANDLE_FLAG_INFORMATION& info) {
                                                                     info.Inherit = 0;
                                                                     info.ProtectFromClose = 0;
                                                                 });
-        }
 
-        c.win_emu.log.error("Unsupported object info class: %X\n", object_information_class);
-        c.emu.stop();
-        return STATUS_NOT_SUPPORTED;
+        case ObjectTypesInformation: {
+            std::vector<std::u16string> type_names;
+            for (uint16_t i = 1; i < handle_types::_last; ++i)
+            {
+                type_names.push_back(get_type_name(static_cast<handle_types::type>(i)));
+            }
+
+            size_t required_size = sizeof(OBJECT_TYPES_INFORMATION);
+            for (const auto& name : type_names)
+            {
+                required_size = (required_size + 7) & ~7; // Align the start of the struct
+                required_size += sizeof(OBJECT_TYPE_INFORMATION);
+                required_size += (name.size() + 1) * sizeof(char16_t);
+            }
+
+            if (required_size > object_information_length)
+            {
+                return_length.write_if_valid(static_cast<ULONG>(required_size));
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            emulator_allocator allocator(c.emu, object_information, object_information_length);
+            const auto types_info = allocator.reserve<OBJECT_TYPES_INFORMATION>();
+            types_info.access(
+                [&](OBJECT_TYPES_INFORMATION& i) { i.NumberOfTypes = static_cast<ULONG>(type_names.size()); });
+
+            for (const auto& name : type_names)
+            {
+                allocator.align(8);
+                const auto type_info = allocator.reserve<OBJECT_TYPE_INFORMATION>();
+                type_info.access([&](OBJECT_TYPE_INFORMATION& i) {
+                    anti_debug::ObjectTypeInformation(c, handle, i);
+                    allocator.make_unicode_string(i.TypeName, name);
+                });
+            }
+
+            return_length.write_if_valid(static_cast<ULONG>(required_size));
+            return STATUS_SUCCESS;
+        }
+        
+        default:
+            c.win_emu.log.error("Unsupported object info class: %X\n", object_information_class);
+            c.emu.stop();
+            return STATUS_NOT_SUPPORTED;
+        }
     }
 
     bool is_awaitable_object_type(const handle h)

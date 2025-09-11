@@ -992,4 +992,10 @@ struct OBJECT_TYPE_INFORMATION
     ULONG DefaultNonPagedPoolCharge;
 };
 
+typedef struct _OBJECT_TYPES_INFORMATION
+{
+  ULONG NumberOfTypes;
+} OBJECT_TYPES_INFORMATION, *POBJECT_TYPES_INFORMATION;
+
+
 // NOLINTEND(modernize-use-using,cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)

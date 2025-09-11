@@ -69,10 +69,10 @@ namespace anti_debug
                                         const emulator_object<OBJECT_ATTRIBUTES<EmulatorTraits<Emu64>>> /*object_attributes*/,
                                         const ULONG /*flags*/)
     {
-        // For now, just return a dummy pseudo-handle to satisfy the anti-debug check.
-        // NtClose can handle pseudo-handles correctly.
-        (void)c;
-        debug_object_handle.write(make_pseudo_handle(1, handle_types::debug_object));
+        // Create a real debug object to be tracked by the handle store.
+        debug_object obj{};
+        const auto new_handle = c.proc.debug_objects.store(std::move(obj));
+        debug_object_handle.write(new_handle);
         return STATUS_SUCCESS;
     }
     NTSTATUS handle_SystemExtendedProcessInformation(const syscall_context& c, const uint64_t system_information,
@@ -193,5 +193,54 @@ namespace anti_debug
         {
             // Failed to read, proceed with normal breakpoint dispatch.
         }
+    }
+
+    void ObjectTypeInformation(const syscall_context& c, const handle object_handle, OBJECT_TYPE_INFORMATION& info)
+    {
+    size_t count = 0;
+    switch (static_cast<handle_types::type>(object_handle.value.type))
+    {
+    case handle_types::file:
+        count = c.proc.files.size();
+        break;
+    case handle_types::device:
+        count = c.proc.devices.size();
+        break;
+    case handle_types::event:
+        count = c.proc.events.size();
+        break;
+    case handle_types::section:
+        count = c.proc.sections.size();
+        break;
+    case handle_types::semaphore:
+        count = c.proc.semaphores.size();
+        break;
+    case handle_types::port:
+        count = c.proc.ports.size();
+        break;
+    case handle_types::thread:
+        count = c.proc.threads.size();
+        break;
+    case handle_types::registry:
+        count = c.proc.registry_keys.size();
+        break;
+    case handle_types::mutant:
+        count = c.proc.mutants.size();
+        break;
+    case handle_types::window:
+        count = c.proc.windows.size();
+        break;
+    case handle_types::timer:
+        count = c.proc.timers.size();
+        break;
+    case handle_types::debug_object:
+        count = c.proc.debug_objects.size();
+        break;
+    default:
+        break;
+    }
+    info.TotalNumberOfObjects = static_cast<ULONG>(count);
+    info.TotalNumberOfHandles = static_cast<ULONG>(count); // Simplification: assume 1 handle per object
+
     }
 }

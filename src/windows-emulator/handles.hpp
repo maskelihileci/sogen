@@ -23,6 +23,7 @@ struct handle_types
         timer,
         process,
         debug_object,
+        _last,
     };
 };
 
