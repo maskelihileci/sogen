@@ -215,6 +215,7 @@ namespace syscalls
 
         const bool reserve = allocation_type & MEM_RESERVE;
         const bool commit = allocation_type & MEM_COMMIT;
+        const bool write_watch = allocation_type & MEM_WRITE_WATCH;
 
         if ((allocation_type & ~(MEM_RESERVE | MEM_COMMIT | MEM_TOP_DOWN | MEM_WRITE_WATCH)) || (!commit && !reserve))
         {
@@ -229,7 +230,8 @@ namespace syscalls
 
         c.win_emu.callbacks.on_memory_allocate(potential_base, allocation_bytes, *protection, false);
 
-        return c.win_emu.memory.allocate_memory(potential_base, static_cast<size_t>(allocation_bytes), *protection, !commit)
+        return c.win_emu.memory.allocate_memory(potential_base, static_cast<size_t>(allocation_bytes), *protection, !commit,
+                                              write_watch)
                    ? STATUS_SUCCESS
                    : STATUS_MEMORY_NOT_ALLOCATED;
     }
@@ -304,5 +306,59 @@ namespace syscalls
     NTSTATUS handle_NtSetInformationVirtualMemory()
     {
         return STATUS_NOT_SUPPORTED;
+    }
+
+    NTSTATUS handle_NtGetWriteWatch(const syscall_context& c, const handle process_handle, uint32_t flags,
+                                      uint64_t base_address, uint64_t region_size,
+                                      uint64_t user_addresses_ptr, emulator_object<uint64_t> number_of_entries,
+                                      emulator_object<uint32_t> granularity)
+    {
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
+        {
+            return STATUS_INVALID_HANDLE;
+        }
+
+        auto written_pages = c.win_emu.memory.get_written_pages(static_cast<uint64_t>(base_address));
+        auto num_entries = number_of_entries.read();
+
+        if (granularity)
+        {
+            granularity.write(0x1000);
+        }
+
+        uint64_t written_count = 0;
+        for (const auto& page : written_pages)
+        {
+            if (written_count < num_entries)
+            {
+                c.emu.write_memory(static_cast<uint64_t>(user_addresses_ptr) + (written_count * sizeof(uint64_t)), &page,
+                                   sizeof(uint64_t));
+            }
+            written_count++;
+        }
+
+        number_of_entries.write(written_count);
+
+        if (flags == 0)
+        {
+            c.win_emu.memory.reset_write_watch(static_cast<uint64_t>(base_address));
+        }
+
+        return STATUS_SUCCESS;
+    }
+    NTSTATUS handle_NtResetWriteWatch(const syscall_context& c, const handle process_handle, uint64_t base_address,
+                                        uint64_t region_size)
+    {
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
+        {
+            return STATUS_INVALID_HANDLE;
+        }
+
+        c.win_emu.memory.reset_write_watch(static_cast<uint64_t>(base_address));
+        return STATUS_SUCCESS;
     }
 }

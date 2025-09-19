@@ -219,6 +219,7 @@ class windows_emulator
     std::atomic_bool should_stop{false};
 
     std::unordered_map<uint16_t, uint16_t> port_mappings_{};
+    std::unordered_map<uint64_t, emulator_hook*> write_watch_hooks_{};
 
     std::vector<std::byte> process_snapshot_{};
     // std::optional<process_context> process_snapshot_{};

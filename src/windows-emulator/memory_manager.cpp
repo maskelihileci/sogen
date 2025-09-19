@@ -269,7 +269,7 @@ bool memory_manager::allocate_mmio(const uint64_t address, const size_t size, mm
 }
 
 bool memory_manager::allocate_memory(const uint64_t address, const size_t size, const nt_memory_permission permissions,
-                                     const bool reserve_only)
+                                     const bool reserve_only, const bool is_write_watch)
 {
     if (this->overlaps_reserved_region(address, size))
     {
@@ -281,8 +281,17 @@ bool memory_manager::allocate_memory(const uint64_t address, const size_t size, 
                                         reserved_region{
                                             .length = size,
                                             .initial_permission = permissions,
+                                            .is_write_watch = is_write_watch,
                                         })
                            .first;
+
+    if (is_write_watch)
+    {
+        if (on_write_watch_added)
+        {
+            on_write_watch_added(address, size);
+        }
+    }
 
     if (!reserve_only)
     {
@@ -415,6 +424,14 @@ bool memory_manager::release_memory(const uint64_t address, size_t size)
         return false;
     }
 
+    if (entry->second.is_write_watch)
+    {
+        if (on_write_watch_removed)
+        {
+            on_write_watch_removed(address, size);
+        }
+    }
+
     if (!size)
     {
         size = entry->second.length;
@@ -475,10 +492,11 @@ void memory_manager::unmap_all_memory()
     this->reserved_regions_.clear();
 }
 
-uint64_t memory_manager::allocate_memory(const size_t size, const nt_memory_permission permissions, const bool reserve_only)
+uint64_t memory_manager::allocate_memory(const size_t size, const nt_memory_permission permissions, const bool reserve_only,
+                                       const bool is_write_watch)
 {
     const auto allocation_base = this->find_free_allocation_base(size);
-    if (!allocate_memory(allocation_base, size, permissions, reserve_only))
+    if (!allocate_memory(allocation_base, size, permissions, reserve_only, is_write_watch))
     {
         return 0;
     }
@@ -656,4 +674,35 @@ void memory_manager::unmap_memory(const uint64_t address, const size_t size)
 void memory_manager::apply_memory_protection(const uint64_t address, const size_t size, const memory_permission permissions)
 {
     this->memory_->apply_memory_protection(address, size, permissions);
+}
+
+const std::unordered_set<uint64_t>& memory_manager::get_written_pages(const uint64_t address) const
+{
+    auto region = const_cast<memory_manager*>(this)->find_reserved_region(address);
+    if (region != reserved_regions_.end() && region->second.is_write_watch)
+    {
+        return region->second.written_pages;
+    }
+
+    static const std::unordered_set<uint64_t> empty_set = {};
+    return empty_set;
+}
+
+void memory_manager::reset_write_watch(const uint64_t address)
+{
+    auto region = find_reserved_region(address);
+    if (region != reserved_regions_.end() && region->second.is_write_watch)
+    {
+        region->second.written_pages.clear();
+    }
+}
+
+void memory_manager::mark_page_as_written(const uint64_t address)
+{
+    auto region = find_reserved_region(address);
+    if (region != reserved_regions_.end() && region->second.is_write_watch)
+    {
+        const auto page = page_align_down(address);
+        region->second.written_pages.insert(page);
+    }
 }

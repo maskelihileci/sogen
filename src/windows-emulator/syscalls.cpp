@@ -133,6 +133,10 @@ namespace syscalls
                                         emulator_pointer buffer, ULONG number_of_bytes_to_read,
                                         emulator_object<ULONG> number_of_bytes_read);
     NTSTATUS handle_NtSetInformationVirtualMemory();
+    NTSTATUS handle_NtGetWriteWatch(const syscall_context& c, handle process_handle, uint32_t flags, uint64_t base_address,
+                                    uint64_t region_size, uint64_t user_addresses_ptr,
+                                    emulator_object<uint64_t> number_of_entries, emulator_object<uint32_t> granularity);
+    NTSTATUS handle_NtResetWriteWatch(const syscall_context& c, handle process_handle, uint64_t base_address, uint64_t region_size);
 
     // syscalls/mutant.cpp:
     NTSTATUS handle_NtReleaseMutant(const syscall_context& c, handle mutant_handle, emulator_object<LONG> previous_count);
@@ -1117,6 +1121,8 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtRemoveIoCompletionEx);
     add_handler(NtCreateDebugObject);
     add_handler(NtReleaseWorkerFactoryWorker);
+    add_handler(NtGetWriteWatch);
+    add_handler(NtResetWriteWatch);
 
 #undef add_handler
 }

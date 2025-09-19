@@ -55,6 +55,8 @@ class memory_manager : public memory_interface
         memory_permission initial_permission{};
         committed_region_map committed_regions{};
         bool is_mmio{false};
+        bool is_write_watch{false};
+        std::unordered_set<uint64_t> written_pages{};
     };
 
     using reserved_region_map = std::map<uint64_t, reserved_region>;
@@ -66,7 +68,8 @@ class memory_manager : public memory_interface
     bool protect_memory(uint64_t address, size_t size, nt_memory_permission permissions, nt_memory_permission* old_permissions = nullptr);
 
     bool allocate_mmio(uint64_t address, size_t size, mmio_read_callback read_cb, mmio_write_callback write_cb);
-    bool allocate_memory(uint64_t address, size_t size, nt_memory_permission permissions, bool reserve_only = false);
+    bool allocate_memory(uint64_t address, size_t size, nt_memory_permission permissions, bool reserve_only = false,
+                         bool is_write_watch = false);
 
     bool commit_memory(uint64_t address, size_t size, nt_memory_permission permissions);
     bool decommit_memory(uint64_t address, size_t size);
@@ -75,7 +78,7 @@ class memory_manager : public memory_interface
 
     void unmap_all_memory();
 
-    uint64_t allocate_memory(size_t size, nt_memory_permission permissions, bool reserve_only = false);
+    uint64_t allocate_memory(size_t size, nt_memory_permission permissions, bool reserve_only = false, bool is_write_watch = false);
 
     uint64_t find_free_allocation_base(size_t size, uint64_t start = 0) const;
 
@@ -84,6 +87,13 @@ class memory_manager : public memory_interface
     reserved_region_map::iterator find_reserved_region(uint64_t address);
 
     bool overlaps_reserved_region(uint64_t address, size_t size) const;
+
+    const std::unordered_set<uint64_t>& get_written_pages(uint64_t address) const;
+    void reset_write_watch(uint64_t address);
+    void mark_page_as_written(uint64_t address);
+
+    std::function<void(uint64_t address, size_t size)> on_write_watch_added;
+    std::function<void(uint64_t address, size_t size)> on_write_watch_removed;
 
     const reserved_region_map& get_reserved_regions() const
     {

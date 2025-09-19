@@ -436,6 +436,23 @@ void windows_emulator::on_instruction_execution(const uint64_t address)
 
 void windows_emulator::setup_hooks()
 {
+    this->memory.on_write_watch_added = [this](uint64_t address, size_t size) {
+        auto* hook = this->emu().hook_memory_write(
+            address, size, [this](uint64_t write_address, const void* data, size_t write_size) {
+                this->memory.mark_page_as_written(write_address);
+            });
+        this->write_watch_hooks_[address] = hook;
+    };
+
+    this->memory.on_write_watch_removed = [this](uint64_t address, size_t size) {
+        auto it = this->write_watch_hooks_.find(address);
+        if (it != this->write_watch_hooks_.end())
+        {
+            this->emu().delete_hook(it->second);
+            this->write_watch_hooks_.erase(it);
+        }
+    };
+
     this->emu().hook_instruction(x86_hookable_instructions::syscall, [&] {
         this->dispatcher.dispatch(*this);
         return instruction_hook_continuation::skip_instruction;
