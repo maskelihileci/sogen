@@ -320,33 +320,46 @@ namespace syscalls
             return STATUS_INVALID_HANDLE;
         }
 
-        auto written_pages = c.win_emu.memory.get_written_pages(static_cast<uint64_t>(base_address));
-        auto num_entries = number_of_entries.read();
-
-        if (granularity)
+        try
         {
-            granularity.write(0x1000);
-        }
-
-        uint64_t written_count = 0;
-        for (const auto& page : written_pages)
-        {
-            if (written_count < num_entries)
+            auto written_pages = c.win_emu.memory.get_written_pages(static_cast<uint64_t>(base_address));
+            auto num_entries = number_of_entries.read();
+            if (granularity)
             {
-                c.emu.write_memory(static_cast<uint64_t>(user_addresses_ptr) + (written_count * sizeof(uint64_t)), &page,
-                                   sizeof(uint64_t));
+                granularity.write(0x1000);
             }
-            written_count++;
+
+            uint64_t written_count = 0;
+            if (user_addresses_ptr != 0)
+            {
+                for (const auto& page : written_pages)
+                {
+                    if (written_count < num_entries)
+                    {
+                        c.emu.write_memory(static_cast<uint64_t>(user_addresses_ptr) + (written_count * sizeof(uint64_t)), &page,
+                                           sizeof(uint64_t));
+                    }
+                    written_count++;
+                }
+            }
+            else
+            {
+                written_count = written_pages.size();
+            }
+
+            number_of_entries.write(written_count);
+
+            if (flags == 0)
+            {
+                c.win_emu.memory.reset_write_watch(static_cast<uint64_t>(base_address));
+            }
+
+            return STATUS_SUCCESS;
         }
-
-        number_of_entries.write(written_count);
-
-        if (flags == 0)
+        catch(const std::runtime_error&)
         {
-            c.win_emu.memory.reset_write_watch(static_cast<uint64_t>(base_address));
+            return STATUS_ACCESS_VIOLATION;
         }
-
-        return STATUS_SUCCESS;
     }
     NTSTATUS handle_NtResetWriteWatch(const syscall_context& c, const handle process_handle, uint64_t base_address,
                                         uint64_t region_size)

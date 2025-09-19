@@ -6,6 +6,23 @@
 #include <utils/file_handle.hpp>
 #include <platform/synchronisation.hpp>
 
+   
+enum ATOM_INFORMATION_CLASS
+{
+    AtomBasicInformation,
+};
+   
+#pragma pack(push, 1)
+struct ATOM_BASIC_INFORMATION
+{
+    uint16_t usage_count;
+    uint16_t flags;
+    uint16_t name_length;
+    // WCHAR name[1]; // name follows
+};
+#pragma pack(pop)
+
+
 struct timer : ref_counted_object
 {
     std::u16string name{};

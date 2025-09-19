@@ -629,6 +629,66 @@ namespace syscalls
         return too_small ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
     }
 
+    NTSTATUS handle_NtQueryInformationAtom(
+        const syscall_context& c,
+        uint16_t atom,
+        ATOM_INFORMATION_CLASS atom_information_class,
+        uint64_t atom_information,
+        uint32_t atom_information_length,
+        emulator_object<uint32_t> return_length)
+    {
+        if (atom_information_class != AtomBasicInformation)
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const auto it = c.proc.atoms.find(atom);
+        if (it == c.proc.atoms.end())
+        {
+            return STATUS_INVALID_HANDLE;
+        }
+
+        const auto& entry = it->second;
+        const auto& atom_name = entry.name;
+
+        const uint32_t required_length = sizeof(ATOM_BASIC_INFORMATION) + static_cast<uint32_t>(atom_name.length() * sizeof(char16_t));
+
+        try
+        {
+            if (return_length)
+            {
+                return_length.write(required_length);
+            }
+
+            if (atom_information_length < sizeof(ATOM_BASIC_INFORMATION))
+            {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            const ATOM_BASIC_INFORMATION basic_info = {
+                .usage_count = static_cast<uint16_t>(entry.ref_count),
+                .flags = 0,
+                .name_length = static_cast<uint16_t>(atom_name.length() * sizeof(char16_t)),
+            };
+
+            c.emu.write_memory(atom_information, &basic_info, sizeof(basic_info));
+
+            const size_t bytes_to_copy = std::min(static_cast<size_t>(atom_name.length() * sizeof(char16_t)),
+                                                  static_cast<size_t>(atom_information_length - sizeof(ATOM_BASIC_INFORMATION)));
+
+            if (bytes_to_copy > 0)
+            {
+                c.emu.write_memory(atom_information + sizeof(ATOM_BASIC_INFORMATION), atom_name.data(), bytes_to_copy);
+            }
+        }
+        catch (const std::runtime_error&)
+        {
+            return STATUS_ACCESS_VIOLATION;
+        }
+
+        return STATUS_SUCCESS;
+    }
+ 
     NTSTATUS handle_NtQueryDebugFilterState()
     {
         return FALSE;
@@ -1123,6 +1183,7 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtReleaseWorkerFactoryWorker);
     add_handler(NtGetWriteWatch);
     add_handler(NtResetWriteWatch);
+    add_handler(NtQueryInformationAtom);
 
 #undef add_handler
 }
