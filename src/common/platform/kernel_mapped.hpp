@@ -57,6 +57,18 @@ typedef struct _LIST_ENTRY64
 
 #endif
 
+typedef struct _LDR_DATA_TABLE_ENTRY64
+{
+    LIST_ENTRY64 InLoadOrderLinks;
+    LIST_ENTRY64 InMemoryOrderLinks;
+    LIST_ENTRY64 InInitializationOrderLinks;
+    std::uint64_t DllBase;
+    std::uint64_t EntryPoint;
+    ULONG SizeOfImage;
+    UNICODE_STRING<EmulatorTraits<Emu64>> FullDllName;
+    UNICODE_STRING<EmulatorTraits<Emu64>> BaseDllName;
+} LDR_DATA_TABLE_ENTRY64, *PLDR_DATA_TABLE_ENTRY64;
+
 typedef struct _PEB_LDR_DATA64
 {
     ULONG Length;

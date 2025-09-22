@@ -94,4 +94,6 @@ struct SYSTEM_PROCESS_INFORMATION
 
     void handle_int2d_exception(windows_emulator& win_emu);
     void ObjectTypeInformation(const syscall_context& c, const handle object_handle, OBJECT_TYPE_INFORMATION& info);
+    NTSTATUS handle_ProcessImageFileName(const syscall_context& c, uint32_t info_class, uint64_t process_information,
+                                         uint32_t process_information_length, const emulator_object<uint32_t> return_length);
 }

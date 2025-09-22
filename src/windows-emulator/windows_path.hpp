@@ -185,6 +185,27 @@ class windows_path
         return this->drive_;
     }
 
+    std::optional<char> get_drive_letter() const
+    {
+        if (this->drive_.has_value())
+        {
+            return this->drive_;
+        }
+
+        if (this->folders_.empty() || this->folders_.front().size() != 2)
+        {
+            return std::nullopt;
+        }
+
+        const auto& front = this->folders_.front();
+        if (front[1] == u':')
+        {
+            return static_cast<char>(front[0]);
+        }
+
+        return std::nullopt;
+    }
+
     windows_path without_drive() const
     {
         return windows_path{std::nullopt, this->folders_};

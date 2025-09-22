@@ -330,3 +330,18 @@ struct debug_object : ref_counted_object
     void serialize_object(utils::buffer_serializer& buffer) const override {}
     void deserialize_object(utils::buffer_deserializer& buffer) override {}
 };
+
+struct symlink : ref_counted_object
+{
+   std::u16string name{};
+
+   void serialize_object(utils::buffer_serializer& buffer) const override
+   {
+       buffer.write(this->name);
+   }
+
+   void deserialize_object(utils::buffer_deserializer& buffer) override
+   {
+       buffer.read(this->name);
+   }
+};

@@ -247,7 +247,52 @@ namespace anti_debug
         break;
     }
     info.TotalNumberOfObjects = static_cast<ULONG>(count);
-    info.TotalNumberOfHandles = static_cast<ULONG>(count); // Simplification: assume 1 handle per object
+    info.TotalNumberOfHandles = static_cast<ULONG>(count); // Simplification: assume 1 handle per object 
+    }
 
+    NTSTATUS handle_ProcessImageFileName(const syscall_context& c, const uint32_t info_class, const uint64_t process_information,
+                                         const uint32_t process_information_length, const emulator_object<uint32_t> return_length)
+    {
+        const auto* mod = c.win_emu.mod_manager.executable;
+        if (!mod)
+        {
+            return STATUS_UNSUCCESSFUL;
+        }
+
+        std::u16string path_str;
+        if (info_class == ProcessImageFileName)
+        {
+            // NT Path: \Device\HarddiskVolumeX\path\to\file.exe
+            path_str = windows_path(mod->path).to_device_path();
+        }
+        else
+        {
+            // Win32 Path: C:\path\to\file.exe
+            path_str = mod->path.u16string();
+        }
+
+        const auto required_size = sizeof(UNICODE_STRING<EmulatorTraits<Emu64>>) + (path_str.size() + 1) * sizeof(char16_t);
+
+        if (return_length)
+        {
+            return_length.write(static_cast<uint32_t>(required_size));
+        }
+
+        if (process_information_length < required_size)
+        {
+            return STATUS_INFO_LENGTH_MISMATCH;
+        }
+
+        const auto buffer_start = process_information + sizeof(UNICODE_STRING<EmulatorTraits<Emu64>>);
+        write_memory_with_callback(c, buffer_start, path_str.c_str(), (path_str.size() + 1) * sizeof(char16_t));
+
+        const emulator_object<UNICODE_STRING<EmulatorTraits<Emu64>>> info{c.emu, process_information};
+        info.access([&](UNICODE_STRING<EmulatorTraits<Emu64>>& str) {
+            str.Length = static_cast<USHORT>(path_str.size() * sizeof(char16_t));
+            str.MaximumLength = static_cast<USHORT>((path_str.size() + 1) * sizeof(char16_t));
+            str.Buffer = buffer_start;
+        });
+
+        return STATUS_SUCCESS;
     }
 }

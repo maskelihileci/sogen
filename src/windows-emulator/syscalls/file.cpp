@@ -1190,6 +1190,12 @@ namespace syscalls
             return STATUS_SUCCESS;
         }
 
+        if (object_name == u"\\??" || object_name == u"\\Global??")
+        {
+            directory_handle.write(GLOBAL_ROOT_DIRECTORY);
+            return STATUS_SUCCESS;
+        }
+
         return STATUS_NOT_SUPPORTED;
     }
 
@@ -1198,7 +1204,21 @@ namespace syscalls
                                              const emulator_object<OBJECT_ATTRIBUTES<EmulatorTraits<Emu64>>> object_attributes)
     {
         const auto attributes = object_attributes.read();
-        const auto object_name = read_unicode_string(c.emu, attributes.ObjectName);
+        auto object_name = read_unicode_string(c.emu, attributes.ObjectName);
+
+        if (attributes.RootDirectory == GLOBAL_ROOT_DIRECTORY)
+        {
+            object_name = std::u16string(u"\\??\\") + object_name;
+        }
+
+        if (object_name.starts_with(u"\\??\\") || object_name.starts_with(u"\\Global??\\"))
+        {
+            symlink sl{};
+            sl.name = object_name;
+            const auto new_handle = c.proc.symlinks.store(std::move(sl));
+            link_handle.write(new_handle);
+            return STATUS_SUCCESS;
+        }
 
         if (object_name == u"KnownDllPath")
         {
@@ -1216,10 +1236,13 @@ namespace syscalls
         if (link_handle == KNOWN_DLLS_SYMLINK)
         {
             constexpr std::u16string_view system32 = u"C:\\WINDOWS\\System32";
-            constexpr auto str_length = system32.size() * 2;
-            constexpr auto max_length = str_length + 2;
+            const auto str_length = static_cast<USHORT>(system32.size() * 2);
+            const auto max_length = static_cast<USHORT>(str_length + 2);
 
-            returned_length.write(max_length);
+            if (returned_length)
+            {
+                returned_length.write(max_length);
+            }
 
             bool too_small = false;
             link_target.access([&](UNICODE_STRING<EmulatorTraits<Emu64>>& str) {
@@ -1230,10 +1253,47 @@ namespace syscalls
                 }
 
                 str.Length = str_length;
+                str.MaximumLength = max_length;
                 write_memory_with_callback(c, str.Buffer, system32.data(), max_length);
             });
 
             return too_small ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
+        }
+
+        const auto* symlink = c.proc.symlinks.get(link_handle);
+        if (symlink && symlink->name.starts_with(u"\\??\\"))
+        {
+            const auto path = windows_path(symlink->name);
+            const auto drive_letter_opt = path.get_drive_letter();
+
+            if (drive_letter_opt)
+            {
+                const auto drive_letter = std::tolower(*drive_letter_opt);
+                const auto device_name = std::u16string(u"\\Device\\HarddiskVolume") + u8_to_u16(std::to_string(drive_letter - 'a' + 1));
+
+                const auto str_length = static_cast<USHORT>(device_name.size() * 2);
+                const auto max_length = static_cast<USHORT>(str_length + 2);
+
+                if (returned_length)
+                {
+                    returned_length.write(max_length);
+                }
+
+                bool too_small = false;
+                link_target.access([&](UNICODE_STRING<EmulatorTraits<Emu64>>& str) {
+                    if (str.MaximumLength < max_length)
+                    {
+                        too_small = true;
+                        return;
+                    }
+
+                    str.Length = str_length;
+                    str.MaximumLength = max_length;
+                    write_memory_with_callback(c, str.Buffer, device_name.data(), max_length);
+                });
+
+                return too_small ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
+            }
         }
 
         return STATUS_NOT_SUPPORTED;

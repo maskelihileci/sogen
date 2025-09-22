@@ -114,34 +114,12 @@ namespace syscalls
                     i.CheckSum = optional_header.CheckSum;
                 });
 
-        case ProcessImageFileNameWin32: {
-            const auto peb = c.proc.peb.read();
-            emulator_object<RTL_USER_PROCESS_PARAMETERS64> proc_params{c.emu, peb.ProcessParameters};
-            const auto params = proc_params.read();
-            const auto length = params.ImagePathName.Length + sizeof(UNICODE_STRING<EmulatorTraits<Emu64>>) + 2;
-
-            if (return_length)
-            {
-                return_length.write(static_cast<uint32_t>(length));
-            }
-
-            if (process_information_length < length)
-            {
-                return STATUS_BUFFER_OVERFLOW;
-            }
-
-            const emulator_object<UNICODE_STRING<EmulatorTraits<Emu64>>> info{c.emu, process_information};
-            info.access([&](UNICODE_STRING<EmulatorTraits<Emu64>>& str) {
-                const auto buffer_start = static_cast<uint64_t>(process_information) + sizeof(UNICODE_STRING<EmulatorTraits<Emu64>>);
-                const auto string = read_unicode_string(c.emu, params.ImagePathName);
-                write_memory_with_callback(c, buffer_start, string.c_str(), (string.size() + 1) * 2);
-                str.Length = params.ImagePathName.Length;
-                str.MaximumLength = str.Length;
-                str.Buffer = buffer_start;
-            });
-
-            return STATUS_SUCCESS;
-        }
+        case ProcessImageFileName:
+                    return anti_debug::handle_ProcessImageFileName(c, info_class, process_information, process_information_length,
+                                                         return_length);
+        case ProcessImageFileNameWin32:
+            return anti_debug::handle_ProcessImageFileName(c, info_class, process_information, process_information_length,
+                                                         return_length);
 
         default:
             c.win_emu.log.error("Unsupported process info class: %X\n", info_class);
