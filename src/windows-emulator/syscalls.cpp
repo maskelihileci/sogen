@@ -114,6 +114,9 @@ namespace syscalls
     NTSTATUS handle_NtQueryDefaultUILanguage(const syscall_context&, emulator_object<LANGID> language_id);
     NTSTATUS handle_NtQueryInstallUILanguage(const syscall_context&, emulator_object<LANGID> language_id);
 
+    // syscalls/user32.dll:
+    uint64_t handle_NtUserCallTwoParam(const syscall_context& c, uint64_t w_param, uint64_t l_param);
+    
     // syscalls/memory.cpp:
     NTSTATUS handle_NtQueryVirtualMemory(const syscall_context& c, handle process_handle, uint64_t base_address, uint32_t info_class,
                                          uint64_t memory_information, uint64_t memory_information_length,
@@ -729,6 +732,45 @@ namespace syscalls
         return STATUS_NOT_SUPPORTED;
     }
 
+    uint64_t handle_NtUserCallTwoParam(const syscall_context& c, const uint64_t w_param, const uint64_t l_param)
+    {
+        struct PointData
+        {
+            int32_t x;
+            int32_t y;
+        };
+
+        const uint64_t point_address = c.emu.reg<uint64_t>(x86_register::rcx);
+        const uint64_t success_status = 1;
+
+        if (point_address == 0 || point_address == 1)
+        {
+            return success_status;
+        }
+
+        static uint64_t counter = 0;
+        counter++;
+
+        const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+        const int32_t thread_id = (int32_t)c.win_emu.current_thread().id;
+        
+        PointData position{};
+        
+        position.x = 500 + (int32_t)((now + counter) % 100);
+        position.y = 500 + (int32_t)((now + counter * 2 + thread_id) % 100);
+
+        try
+        {
+            write_memory_with_callback(c, point_address, position);
+        }
+        catch (const std::exception& e)
+        {
+            return 0;
+        }
+
+        return success_status;
+    }
+    
     NTSTATUS handle_NtUserSetCursor()
     {
         return STATUS_NOT_SUPPORTED;
@@ -1111,6 +1153,7 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtGetContextThread);
     add_handler(NtYieldExecution);
     add_handler(NtUserModifyUserStartupInfoFlags);
+    add_handler(NtUserCallTwoParam);
     add_handler(NtUserGetDCEx);
     add_handler(NtUserGetDC);
     add_handler(NtUserGetWindowDC);
