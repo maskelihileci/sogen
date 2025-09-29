@@ -156,6 +156,13 @@ void kusd_mmio::update()
 {
     const auto time = this->clock_->system_now();
     utils::convert_to_ksystem_time(&this->kusd_.SystemTime, time);
+
+    const auto ms_since_boot = std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count();
+    const auto interrupt_time = ms_since_boot * 10000LL;
+    this->kusd_.InterruptTime.LowPart = static_cast<ULONG>(interrupt_time & 0xFFFFFFFF);
+    this->kusd_.InterruptTime.High1Time = static_cast<LONG>((interrupt_time >> 32) & 0xFFFFFFFF);
+    this->kusd_.InterruptTime.High2Time = this->kusd_.InterruptTime.High1Time;
+    this->kusd_.TickCount.TickCountQuad = ms_since_boot;
 }
 
 void kusd_mmio::register_mmio()

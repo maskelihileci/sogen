@@ -108,14 +108,18 @@ namespace syscalls
         case SystemExtendedProcessInformation:
             return anti_debug::handle_SystemExtendedProcessInformation(c, system_information, system_information_length,
                                                                        return_length);
-        case SystemMemoryUsageInformation:
         case SystemCodeIntegrityPolicyInformation:
         case SystemHypervisorSharedPageInformation:
         case SystemFeatureConfigurationInformation:
         case SystemSupportedProcessorArchitectures2:
         case SystemFeatureConfigurationSectionInformation:
-        case SystemFirmwareTableInformation:
             return STATUS_NOT_SUPPORTED;
+
+        case SystemMemoryUsageInformation:
+            return anti_debug::handle_SystemMemoryUsageInformation(c, system_information, system_information_length, return_length);
+
+        case SystemFirmwareTableInformation:
+            return anti_debug::handle_SystemFirmwareTableInformation(c, input_buffer, input_buffer_length, system_information, system_information_length, return_length);
 
         case SystemControlFlowTransition:
             c.win_emu.callbacks.on_suspicious_activity("Warbird control flow transition");

@@ -71,12 +71,18 @@ namespace syscalls
                 b = FALSE; //
             });
 
+        case ProcessQuotaLimits:
+            return anti_debug::handle_ProcessQuotaLimits(c, process_information, process_information_length, return_length);
+
         case ProcessBasicInformation:
             return handle_query<PROCESS_BASIC_INFORMATION64>(c, process_information, process_information_length, return_length,
                                                              [&](PROCESS_BASIC_INFORMATION64& basic_info) {
                                                                  basic_info.PebBaseAddress = c.proc.peb.value();
                                                                  basic_info.UniqueProcessId = 1;
                                                              });
+
+        case ProcessVmCounters:
+            return anti_debug::handle_ProcessVmCounters(c, process_information, process_information_length, return_length);
 
         case ProcessIoCounters:
             return anti_debug::handle_ProcessIoCounters(c, process_information, process_information_length, return_length);

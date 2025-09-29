@@ -16,6 +16,16 @@ namespace
         return std::equal(suffix.rbegin(), suffix.rend(), str.rbegin(),
                           [](char16_t a, char16_t b) { return std::tolower(a) == std::tolower(b); });
     }
+
+    uint8_t calculate_checksum(const uint8_t* data, size_t length)
+    {
+        uint8_t sum = 0;
+        for (size_t i = 0; i < length; ++i)
+        {
+            sum += data[i];
+        }
+        return -sum;
+    }
 }
 
 namespace anti_debug
@@ -294,5 +304,150 @@ namespace anti_debug
         });
 
         return STATUS_SUCCESS;
+    }
+
+    NTSTATUS handle_SystemMemoryUsageInformation(const syscall_context& c, const uint64_t system_information,
+                                                 const uint32_t system_information_length, const emulator_object<uint32_t> return_length)
+    {
+        return handle_query<SYSTEM_MEMORY_USAGE_INFORMATION>(c, system_information, system_information_length, return_length,
+                                                            [&](SYSTEM_MEMORY_USAGE_INFORMATION& info) {
+                                                                info.TotalPhysicalBytes = 8ULL * 1024 * 1024 * 1024; // 8GB
+                                                                info.AvailableBytes = 7ULL * 1024 * 1024 * 1024; // 7GB
+                                                                info.ResidentAvailableBytes = 6LL * 1024 * 1024 * 1024; // 6GB
+                                                                info.CommittedBytes = 2ULL * 1024 * 1024 * 1024; // 2GB
+                                                                info.SharedCommittedBytes = 1ULL * 1024 * 1024 * 1024; // 1GB
+                                                                info.CommitLimitBytes = 8ULL * 1024 * 1024 * 1024; // 8GB
+                                                                info.PeakCommitmentBytes = 3ULL * 1024 * 1024 * 1024; // 3GB
+                                                            });
+    }
+
+    NTSTATUS handle_SystemFirmwareTableInformation(const syscall_context& c, const uint64_t input_buffer,
+                                                   const uint32_t input_buffer_length, const uint64_t system_information,
+                                                   const uint32_t system_information_length, const emulator_object<uint32_t> return_length)
+    {
+        if (!input_buffer || input_buffer_length != sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION))
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SYSTEM_FIRMWARE_TABLE_INFORMATION request_data{};
+        const auto mem_data = c.emu.read_memory(input_buffer, sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION));
+        memcpy(&request_data, mem_data.data(), sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION));
+
+        if (request_data.ProviderSignature != 0x424D5352) // 'RSMB' for SMBIOS
+        {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        if (request_data.Action != SystemFirmwareTableGet)
+        {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        if (request_data.TableID != 0)
+        {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        const size_t eps_size = 0x1F;
+        const size_t table_size = sizeof(smbios_data) - eps_size;
+        const size_t total_size = eps_size + table_size;
+
+        if (return_length)
+        {
+            return_length.write(static_cast<ULONG>(total_size));
+        }
+
+        if (system_information_length < total_size)
+        {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        // Copy EPS
+        uint8_t eps[0x1F];
+        memcpy(eps, smbios_data, eps_size);
+
+        // Calculate checksums
+        eps[4] = calculate_checksum(eps, 0x10); // EPS checksum
+        eps[5] = 0x1F; // Length already set
+        // Update table length and address
+        const uint16_t table_len = static_cast<uint16_t>(table_size);
+        eps[0x16] = table_len & 0xFF;
+        eps[0x17] = (table_len >> 8) & 0xFF;
+        const uint32_t table_addr = system_information + eps_size;
+        eps[0x18] = table_addr & 0xFF;
+        eps[0x19] = (table_addr >> 8) & 0xFF;
+        eps[0x1A] = (table_addr >> 16) & 0xFF;
+        eps[0x1B] = (table_addr >> 24) & 0xFF;
+        eps[0x1C] = 2; // Number of structures (Type 16 and 17)
+        eps[0x1D] = 0;
+
+        // Intermediate checksum
+        eps[0x11] = calculate_checksum(eps + 0x10, 0x0F);
+
+        write_memory_with_callback(c, system_information, eps, eps_size);
+
+        // Copy table data
+        write_memory_with_callback(c, system_information + eps_size, smbios_data + eps_size, table_size);
+
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS handle_ProcessQuotaLimits(const syscall_context& c, uint64_t process_information,
+                                       uint32_t process_information_length, const emulator_object<uint32_t> return_length)
+    {
+        struct QUOTA_LIMITS {
+            SIZE_T PagedPoolLimit;
+            SIZE_T NonPagedPoolLimit;
+            SIZE_T MinimumWorkingSetSize;
+            SIZE_T MaximumWorkingSetSize;
+            SIZE_T PagefileLimit;
+            LARGE_INTEGER TimeLimit;
+        };
+
+        return handle_query<QUOTA_LIMITS>(c, process_information, process_information_length, return_length,
+                                          [&](QUOTA_LIMITS& limits) {
+                                              limits.PagedPoolLimit = 0;
+                                              limits.NonPagedPoolLimit = 0;
+                                              limits.MinimumWorkingSetSize = 0;
+                                              limits.MaximumWorkingSetSize = 0;
+                                              limits.PagefileLimit = 0;
+                                              limits.TimeLimit.QuadPart = 0;
+                                          });
+    }
+
+    NTSTATUS handle_ProcessVmCounters(const syscall_context& c, uint64_t process_information,
+                                      uint32_t process_information_length, const emulator_object<uint32_t> return_length)
+    {
+        struct VM_COUNTERS {
+            SIZE_T PeakVirtualSize;
+            SIZE_T VirtualSize;
+            ULONG PageFaultCount;
+            SIZE_T PeakWorkingSetSize;
+            SIZE_T WorkingSetSize;
+            SIZE_T QuotaPeakPagedPoolUsage;
+            SIZE_T QuotaPagedPoolUsage;
+            SIZE_T QuotaPeakNonPagedPoolUsage;
+            SIZE_T QuotaNonPagedPoolUsage;
+            SIZE_T PagefileUsage;
+            SIZE_T PeakPagefileUsage;
+            SIZE_T PrivateUsage;
+        };
+
+        return handle_query<VM_COUNTERS>(c, process_information, process_information_length, return_length,
+                                         [&](VM_COUNTERS& counters) {
+                                             counters.PeakVirtualSize = 0;
+                                             counters.VirtualSize = 0;
+                                             counters.PageFaultCount = 0;
+                                             counters.PeakWorkingSetSize = 0;
+                                             counters.WorkingSetSize = 0;
+                                             counters.QuotaPeakPagedPoolUsage = 0;
+                                             counters.QuotaPagedPoolUsage = 0;
+                                             counters.QuotaPeakNonPagedPoolUsage = 0;
+                                             counters.QuotaNonPagedPoolUsage = 0;
+                                             counters.PagefileUsage = 0;
+                                             counters.PeakPagefileUsage = 0;
+                                             counters.PrivateUsage = 0;
+                                         });
     }
 }
