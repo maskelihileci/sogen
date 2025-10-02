@@ -367,4 +367,24 @@ namespace syscalls
         // puts("NtQuerySecurityAttributesToken not supported");
         return STATUS_NOT_SUPPORTED;
     }
+
+    NTSTATUS handle_NtAdjustPrivilegesToken(const syscall_context& /*c*/, handle /*token_handle*/, BOOLEAN /*disable_all_privileges*/,
+                                           emulator_object<TOKEN_PRIVILEGES> /*new_state*/, ULONG /*buffer_length*/,
+                                           emulator_object<TOKEN_PRIVILEGES> previous_state,
+                                           emulator_object<ULONG> required_length)
+    {
+        if (required_length)
+        {
+            required_length.write(sizeof(TOKEN_PRIVILEGES));
+        }
+
+        if (previous_state)
+        {
+            TOKEN_PRIVILEGES prev_privs{};
+            prev_privs.PrivilegeCount = 0;
+            previous_state.write(prev_privs);
+        }
+
+        return STATUS_SUCCESS;
+    }
 }

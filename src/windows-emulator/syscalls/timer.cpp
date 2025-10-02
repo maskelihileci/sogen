@@ -24,7 +24,7 @@ namespace syscalls
 
         if (set_resolution)
         {
-            return STATUS_TIMER_RESOLUTION_NOT_SET;
+            return STATUS_SUCCESS;
         }
 
         return STATUS_SUCCESS;
@@ -73,8 +73,12 @@ namespace syscalls
         return handle_NtCreateTimer2(c, timer_handle, 0, object_attributes, timer_type, desired_access);
     }
 
-    NTSTATUS handle_NtSetTimer()
+    NTSTATUS handle_NtSetTimer(const syscall_context& c, handle /*timer_handle*/, emulator_object<LARGE_INTEGER> /*due_time*/, emulator_pointer timer_apc_routine, emulator_pointer timer_context, BOOLEAN /*resume_timer*/, LONG /*period*/, emulator_object<BOOLEAN> /*previous_state*/)
     {
+        if (timer_apc_routine)
+        {
+            c.win_emu.current_thread().pending_apcs.push_back({0, timer_apc_routine, timer_context ? timer_context : 0, WM_TIMER, 0});
+        }
         return STATUS_SUCCESS;
     }
 

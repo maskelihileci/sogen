@@ -327,8 +327,8 @@ struct port : ref_counted_object
  
 struct debug_object : ref_counted_object
 {
-    void serialize_object(utils::buffer_serializer& buffer) const override {}
-    void deserialize_object(utils::buffer_deserializer& buffer) override {}
+    void serialize_object(utils::buffer_serializer& /*buffer*/) const override {}
+    void deserialize_object(utils::buffer_deserializer& /*buffer*/) override {}
 };
 
 struct symlink : ref_counted_object

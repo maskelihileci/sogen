@@ -325,72 +325,207 @@ namespace anti_debug
                                                    const uint32_t input_buffer_length, const uint64_t system_information,
                                                    const uint32_t system_information_length, const emulator_object<uint32_t> return_length)
     {
-        if (!input_buffer || input_buffer_length != sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION))
-        {
-            return STATUS_INVALID_PARAMETER;
-        }
-
         SYSTEM_FIRMWARE_TABLE_INFORMATION request_data{};
-        const auto mem_data = c.emu.read_memory(input_buffer, sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION));
-        memcpy(&request_data, mem_data.data(), sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION));
 
-        if (request_data.ProviderSignature != 0x424D5352) // 'RSMB' for SMBIOS
+        // If input_buffer is provided, read the request data
+        if (input_buffer && input_buffer_length >= sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION))
         {
-            return STATUS_NOT_SUPPORTED;
+            const auto mem_data = c.emu.read_memory(input_buffer, sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION));
+            memcpy(&request_data, mem_data.data(), sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION));
+        }
+        else
+        {
+            // Default to enumeration if no input buffer or invalid
+            request_data.Action = SystemFirmwareTableEnumerate;
+            request_data.ProviderSignature = 0x49435041; // 'ACPI'
         }
 
-        if (request_data.Action != SystemFirmwareTableGet)
+        if (request_data.Action == SystemFirmwareTableEnumerate)
         {
-            return STATUS_NOT_SUPPORTED;
+            // Enumeration: return array of table IDs for ACPI provider
+            // Al-khaser checks ACPI firmware tables, so return ACPI table IDs
+            const std::vector<DWORD> tables = { 0x50434146, 0x43495041, 0x54455048 }; // 'FACP', 'APIC', 'HPET'
+
+            const size_t total_size = tables.size() * sizeof(DWORD);
+
+            if (return_length)
+            {
+                return_length.write(static_cast<ULONG>(total_size));
+            }
+
+            if (system_information_length < total_size)
+            {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            write_memory_with_callback(c, system_information, tables.data(), total_size);
+            return STATUS_SUCCESS;
+        }
+        else if (request_data.Action == SystemFirmwareTableGet)
+        {
+            if (request_data.ProviderSignature == 0x424D5352) // 'RSMB' for SMBIOS
+            {
+                if (request_data.TableID != 0)
+                {
+                    return STATUS_NOT_SUPPORTED;
+                }
+
+                const size_t eps_size = 0x1F;
+                const size_t table_size = sizeof(smbios_data) - eps_size;
+                const size_t total_size = eps_size + table_size;
+
+                if (return_length)
+                {
+                    return_length.write(static_cast<ULONG>(total_size));
+                }
+
+                if (system_information_length < total_size)
+                {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+
+                // Copy EPS
+                uint8_t eps[0x1F];
+                memcpy(eps, smbios_data, eps_size);
+
+                // Calculate checksums
+                eps[4] = calculate_checksum(eps, 0x10); // EPS checksum
+                eps[5] = 0x1F; // Length already set
+                // Update table length and address
+                const uint16_t table_len = static_cast<uint16_t>(table_size);
+                eps[0x16] = table_len & 0xFF;
+                eps[0x17] = (table_len >> 8) & 0xFF;
+                const uint32_t table_addr = static_cast<uint32_t>(system_information + eps_size);
+                eps[0x18] = table_addr & 0xFF;
+                eps[0x19] = (table_addr >> 8) & 0xFF;
+                eps[0x1A] = (table_addr >> 16) & 0xFF;
+                eps[0x1B] = (table_addr >> 24) & 0xFF;
+                eps[0x1C] = 2; // Number of structures (Type 16 and 17)
+                eps[0x1D] = 0;
+
+                // Intermediate checksum
+                eps[0x11] = calculate_checksum(eps + 0x10, 0x0F);
+
+                write_memory_with_callback(c, system_information, eps, eps_size);
+
+                // Copy table data
+                write_memory_with_callback(c, system_information + eps_size, smbios_data + eps_size, table_size);
+
+                return STATUS_SUCCESS;
+            }
+            else if (request_data.ProviderSignature == 0x49435041) // 'ACPI'
+            {
+                // Return different ACPI tables based on TableID
+                std::vector<uint8_t> table_data;
+
+                if (request_data.TableID == 0x50434146) // 'FACP' - Fixed ACPI Description Table
+                {
+                    // Minimal FACP structure
+                    const uint8_t facp[] = {
+                        'F', 'A', 'C', 'P',           // Signature
+                        0x74, 0x00, 0x00, 0x00,       // Length (116)
+                        0x01,                         // Revision
+                        0x00,                         // Checksum
+                        'A', 'C', 'P', 'I',           // OEM ID
+                        'T', 'A', 'B', 'L', 'E', 0, 0, 0, // OEM Table ID
+                        0x01, 0x00, 0x00, 0x00,       // OEM Revision
+                        0x00, 0x00, 0x00, 0x00,       // Creator ID
+                        0x01, 0x00, 0x00, 0x00,       // Creator Revision
+                        // ... minimal FACP content
+                    };
+                    table_data.assign(facp, facp + sizeof(facp));
+                }
+                else if (request_data.TableID == 0x43495041) // 'APIC' - Multiple APIC Description Table
+                {
+                    // Minimal MADT structure
+                    const uint8_t madt[] = {
+                        'A', 'P', 'I', 'C',           // Signature
+                        0x2C, 0x00, 0x00, 0x00,       // Length (44)
+                        0x01,                         // Revision
+                        0x00,                         // Checksum
+                        'A', 'C', 'P', 'I',           // OEM ID
+                        'T', 'A', 'B', 'L', 'E', 0, 0, 0, // OEM Table ID
+                        0x01, 0x00, 0x00, 0x00,       // OEM Revision
+                        0x00, 0x00, 0x00, 0x00,       // Creator ID
+                        0x01, 0x00, 0x00, 0x00,       // Creator Revision
+                        0x00, 0x00, 0x00, 0x00,       // Local APIC Address
+                        0x00, 0x00, 0x00, 0x01        // Flags
+                    };
+                    table_data.assign(madt, madt + sizeof(madt));
+                }
+                else if (request_data.TableID == 0x54455048) // 'HPET' - High Precision Event Timer
+                {
+                    // Minimal HPET structure
+                    const uint8_t hpet[] = {
+                        'H', 'P', 'E', 'T',           // Signature
+                        0x38, 0x00, 0x00, 0x00,       // Length (56)
+                        0x01,                         // Revision
+                        0x00,                         // Checksum
+                        'A', 'C', 'P', 'I',           // OEM ID
+                        'T', 'A', 'B', 'L', 'E', 0, 0, 0, // OEM Table ID
+                        0x01, 0x00, 0x00, 0x00,       // OEM Revision
+                        0x00, 0x00, 0x00, 0x00,       // Creator ID
+                        0x01, 0x00, 0x00, 0x00,       // Creator Revision
+                        0x00, 0x00, 0x00, 0x80,       // Hardware Rev ID + Comparator Count + Counter Size + Reserved + Legacy Replacement Capable
+                        0x00, 0x00,                   // PCI Vendor ID
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Base Address
+                        0x00, 0x00, 0x00, 0x00,       // HPET Number
+                        0x00, 0x00, 0x00, 0x00,       // Min Clock Tick
+                        0x00                          // Page Protection
+                    };
+                    table_data.assign(hpet, hpet + sizeof(hpet));
+                }
+                else
+                {
+                    // Default: return a minimal generic ACPI table
+                    const uint8_t generic[] = {
+                        'X', 'X', 'X', 'X',           // Signature (placeholder)
+                        0x24, 0x00, 0x00, 0x00,       // Length (36)
+                        0x01,                         // Revision
+                        0x00,                         // Checksum
+                        'A', 'C', 'P', 'I',           // OEM ID
+                        'T', 'A', 'B', 'L', 'E', 0, 0, 0, // OEM Table ID
+                        0x01, 0x00, 0x00, 0x00,       // OEM Revision
+                        0x00, 0x00, 0x00, 0x00,       // Creator ID
+                        0x01, 0x00, 0x00, 0x00        // Creator Revision
+                    };
+                    table_data.assign(generic, generic + sizeof(generic));
+                }
+
+                // Calculate checksum for the table
+                if (!table_data.empty())
+                {
+                    table_data[9] = calculate_checksum(table_data.data(), table_data.size());
+                }
+
+                const size_t total_size = table_data.size();
+
+                if (return_length)
+                {
+                    return_length.write(static_cast<ULONG>(total_size));
+                }
+
+                if (system_information_length < total_size)
+                {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+
+                write_memory_with_callback(c, system_information, table_data.data(), total_size);
+                return STATUS_SUCCESS;
+            }
         }
 
-        if (request_data.TableID != 0)
-        {
-            return STATUS_NOT_SUPPORTED;
-        }
+        return STATUS_NOT_SUPPORTED;
+    }
 
-        const size_t eps_size = 0x1F;
-        const size_t table_size = sizeof(smbios_data) - eps_size;
-        const size_t total_size = eps_size + table_size;
-
-        if (return_length)
-        {
-            return_length.write(static_cast<ULONG>(total_size));
-        }
-
-        if (system_information_length < total_size)
-        {
-            return STATUS_BUFFER_TOO_SMALL;
-        }
-
-        // Copy EPS
-        uint8_t eps[0x1F];
-        memcpy(eps, smbios_data, eps_size);
-
-        // Calculate checksums
-        eps[4] = calculate_checksum(eps, 0x10); // EPS checksum
-        eps[5] = 0x1F; // Length already set
-        // Update table length and address
-        const uint16_t table_len = static_cast<uint16_t>(table_size);
-        eps[0x16] = table_len & 0xFF;
-        eps[0x17] = (table_len >> 8) & 0xFF;
-        const uint32_t table_addr = system_information + eps_size;
-        eps[0x18] = table_addr & 0xFF;
-        eps[0x19] = (table_addr >> 8) & 0xFF;
-        eps[0x1A] = (table_addr >> 16) & 0xFF;
-        eps[0x1B] = (table_addr >> 24) & 0xFF;
-        eps[0x1C] = 2; // Number of structures (Type 16 and 17)
-        eps[0x1D] = 0;
-
-        // Intermediate checksum
-        eps[0x11] = calculate_checksum(eps + 0x10, 0x0F);
-
-        write_memory_with_callback(c, system_information, eps, eps_size);
-
-        // Copy table data
-        write_memory_with_callback(c, system_information + eps_size, smbios_data + eps_size, table_size);
-
-        return STATUS_SUCCESS;
+    NTSTATUS handle_SystemLicenseInformation(const syscall_context& c, const uint64_t system_information,
+                                             const uint32_t system_information_length, const emulator_object<uint32_t> return_length)
+    {
+        return handle_query<SYSTEM_LICENSE_INFORMATION>(c, system_information, system_information_length, return_length,
+                                                         [&](SYSTEM_LICENSE_INFORMATION& license_info) {
+                                                             license_info.LicenseStatus = 0; // SL_GEN_STATE_IS_GENUINE
+                                                             license_info.LicenseType = 1;   // Genuine license
+                                                         });
     }
 
     NTSTATUS handle_ProcessQuotaLimits(const syscall_context& c, uint64_t process_information,
@@ -450,4 +585,107 @@ namespace anti_debug
                                              counters.PrivateUsage = 0;
                                          });
     }
+
+   BOOL power_capabilities()
+   {
+
+       SYSTEM_POWER_CAPABILITIES powerCaps{};
+       // In a real system, this would call GetPwrCapabilities(&powerCaps)
+       // For anti-debug bypass, we return power capabilities that make it look like a VM
+
+       powerCaps.PowerButtonPresent = TRUE;
+       powerCaps.SleepButtonPresent = TRUE;
+       powerCaps.LidPresent = TRUE;
+       powerCaps.SystemS1 = FALSE;  // VMs don't support S1
+       powerCaps.SystemS2 = FALSE;  // VMs don't support S2
+       powerCaps.SystemS3 = FALSE;  // VMs don't support S3
+       powerCaps.SystemS4 = FALSE;  // VMs don't support S4
+       powerCaps.SystemS5 = TRUE;
+       powerCaps.HiberFilePresent = FALSE;
+       powerCaps.FullWake = TRUE;
+       powerCaps.VideoDimPresent = TRUE;
+       powerCaps.ApmPresent = FALSE;
+       powerCaps.UpsPresent = FALSE;
+       powerCaps.ThermalControl = FALSE;  // VMs usually don't have thermal control
+       powerCaps.ProcessorThrottle = TRUE;
+       powerCaps.ProcessorMinThrottle = 0;
+       powerCaps.ProcessorMaxThrottle = 100;
+       powerCaps.FastSystemS4 = FALSE;
+       powerCaps.DiskSpinDown = TRUE;
+       powerCaps.SystemBatteriesPresent = FALSE;
+
+       // The anti-debug check: if S1-S4 are all FALSE and ThermalControl is FALSE, it's considered a VM
+       if ((powerCaps.SystemS1 | powerCaps.SystemS2 | powerCaps.SystemS3 | powerCaps.SystemS4) == FALSE) {
+           return (powerCaps.ThermalControl == FALSE);
+       }
+
+       return FALSE;
+   }
+
+   NTSTATUS handle_QueryKeyCachedInformation(const syscall_context& c, const uint64_t key_information, const ULONG length,
+                                             const emulator_object<ULONG> result_length, const handle key_handle)
+   {
+       constexpr auto required_size = sizeof(KEY_CACHED_INFORMATION);
+       result_length.write(required_size);
+
+       if (length < required_size)
+       {
+           return STATUS_BUFFER_TOO_SMALL;
+       }
+
+       // Return fake cached information to bypass anti-debug detection
+       // This provides information that looks like a real registry key
+       KEY_CACHED_INFORMATION info{};
+       info.LastWriteTime.QuadPart = 0;
+       info.TitleIndex = 0;
+       info.SubKeys = 10;  // Fake number of subkeys
+       info.MaxNameLen = 100;  // Fake max name length
+       info.Values = 5;  // Fake number of values
+       info.MaxValueNameLen = 50;  // Fake max value name length
+       info.MaxValueDataLen = 1024;  // Fake max value data length
+       info.NameLength = static_cast<ULONG>((key_handle == 0 ? 0 : 1) * 2);  // Fake name length
+
+       const emulator_object<KEY_CACHED_INFORMATION> info_obj{c.emu, key_information};
+       info_obj.write(info);
+
+       return STATUS_SUCCESS;
+   }
+
+   NTSTATUS handle_SystemPowerCapabilities(const syscall_context& c, const uint64_t output_buffer, const ULONG output_buffer_length)
+   {
+       if (output_buffer_length < sizeof(SYSTEM_POWER_CAPABILITIES))
+       {
+           return STATUS_BUFFER_TOO_SMALL;
+       }
+
+       // Return fake power capabilities to bypass anti-debug detection
+       // VMs typically don't support S1-S4 sleep states and thermal control
+       SYSTEM_POWER_CAPABILITIES caps{};
+       memset(&caps, 0, sizeof(caps));
+       caps.PowerButtonPresent = TRUE;
+       caps.SleepButtonPresent = TRUE;
+       caps.LidPresent = TRUE;
+       caps.SystemS1 = FALSE;  // VMs don't support S1
+       caps.SystemS2 = FALSE;  // VMs don't support S2
+       caps.SystemS3 = FALSE;  // VMs don't support S3
+       caps.SystemS4 = FALSE;  // VMs don't support S4
+       caps.SystemS5 = TRUE;
+       caps.HiberFilePresent = FALSE;
+       caps.FullWake = TRUE;
+       caps.VideoDimPresent = TRUE;
+       caps.ApmPresent = FALSE;
+       caps.UpsPresent = FALSE;
+       caps.ThermalControl = FALSE;  // VMs usually don't have thermal control
+       caps.ProcessorThrottle = TRUE;
+       caps.ProcessorMinThrottle = 0;
+       caps.ProcessorMaxThrottle = 100;
+       caps.FastSystemS4 = FALSE;
+       caps.DiskSpinDown = TRUE;
+       caps.SystemBatteriesPresent = FALSE;
+       caps.BatteriesAreShortTerm = FALSE;
+       // BatteryScale and other fields can be zero for simplicity
+
+       write_memory_with_callback(c, output_buffer, &caps, sizeof(caps));
+       return STATUS_SUCCESS;
+   }
 }

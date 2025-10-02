@@ -121,6 +121,9 @@ namespace syscalls
         case SystemFirmwareTableInformation:
             return anti_debug::handle_SystemFirmwareTableInformation(c, input_buffer, input_buffer_length, system_information, system_information_length, return_length);
 
+        case SystemPolicyInformation:
+            return anti_debug::handle_SystemLicenseInformation(c, system_information, system_information_length, return_length);
+
         case SystemControlFlowTransition:
             c.win_emu.callbacks.on_suspicious_activity("Warbird control flow transition");
             return STATUS_NOT_SUPPORTED;
@@ -303,5 +306,20 @@ namespace syscalls
     NTSTATUS handle_NtSetSystemInformation()
     {
         return STATUS_NOT_SUPPORTED;
+    }
+
+    NTSTATUS handle_NtPowerInformation(const syscall_context& c, POWER_INFORMATION_LEVEL information_level,
+                                      uint64_t /*input_buffer*/, ULONG /*input_buffer_length*/,
+                                      uint64_t output_buffer, ULONG output_buffer_length)
+    {
+        switch (information_level)
+        {
+        case SystemPowerCapabilities:
+            return anti_debug::handle_SystemPowerCapabilities(c, output_buffer, output_buffer_length);
+
+        default:
+            c.win_emu.log.error("Unsupported power info level: %X\n", information_level);
+            return STATUS_NOT_SUPPORTED;
+        }
     }
 }

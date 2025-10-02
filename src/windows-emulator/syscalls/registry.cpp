@@ -3,6 +3,7 @@
 #include "../cpu_context.hpp"
 #include "../emulator_utils.hpp"
 #include "../syscall_utils.hpp"
+#include "../anti_debug.hpp"
 
 namespace syscalls
 {
@@ -104,6 +105,11 @@ namespace syscalls
             info_obj.write(info);
 
             return STATUS_SUCCESS;
+        }
+
+        if (key_information_class == KeyCachedInformation)
+        {
+            return anti_debug::handle_QueryKeyCachedInformation(c, key_information, length, result_length, key_handle);
         }
 
         c.win_emu.log.warn("Unsupported registry class: %X\n", key_information_class);

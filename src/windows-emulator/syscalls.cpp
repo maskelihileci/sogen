@@ -116,6 +116,8 @@ namespace syscalls
 
     // syscalls/user32.dll:
     uint64_t handle_NtUserCallTwoParam(const syscall_context& c, uint64_t w_param, uint64_t l_param);
+    uint64_t handle_NtUserSetTimer(const syscall_context& c, hwnd window, uint64_t id_event, uint32_t elapse, uint64_t timer_proc);
+    BOOL handle_NtUserKillTimer(const syscall_context& /*c*/, hwnd /*window*/, uint64_t /*id_event*/);
     
     // syscalls/memory.cpp:
     NTSTATUS handle_NtQueryVirtualMemory(const syscall_context& c, handle process_handle, uint64_t base_address, uint32_t info_class,
@@ -260,6 +262,9 @@ namespace syscalls
                                                uint32_t input_buffer_length, uint64_t system_information,
                                                uint32_t system_information_length, emulator_object<uint32_t> return_length);
     NTSTATUS handle_NtSetSystemInformation();
+    NTSTATUS handle_NtPowerInformation(const syscall_context& c, POWER_INFORMATION_LEVEL information_level,
+                                      uint64_t input_buffer, ULONG input_buffer_length,
+                                      uint64_t output_buffer, ULONG output_buffer_length);
 
     // syscalls/thread.cpp:
     NTSTATUS handle_NtSetInformationThread(const syscall_context& c, handle thread_handle, THREADINFOCLASS info_class,
@@ -315,22 +320,25 @@ namespace syscalls
                                    ACCESS_MASK desired_access);
     NTSTATUS handle_NtCreateTimer(const syscall_context& c, emulator_object<handle> timer_handle, ACCESS_MASK desired_access,
                                   emulator_object<OBJECT_ATTRIBUTES<EmulatorTraits<Emu64>>> object_attributes, ULONG timer_type);
-    NTSTATUS handle_NtSetTimer();
+    NTSTATUS handle_NtSetTimer(const syscall_context& c, handle timer_handle, emulator_object<LARGE_INTEGER> due_time, emulator_pointer timer_apc_routine, emulator_pointer timer_context, BOOLEAN resume_timer, LONG period, emulator_object<BOOLEAN> previous_state);
     NTSTATUS handle_NtSetTimer2();
     NTSTATUS handle_NtSetTimerEx(const syscall_context& c, handle timer_handle, uint32_t timer_set_info_class,
                                  uint64_t timer_set_information, ULONG timer_set_information_length);
     NTSTATUS handle_NtCancelTimer();
 
     // syscalls/token.cpp:
-    NTSTATUS
-    handle_NtDuplicateToken(const syscall_context&, handle existing_token_handle, ACCESS_MASK /*desired_access*/,
-                            emulator_object<OBJECT_ATTRIBUTES<EmulatorTraits<Emu64>>>
-                            /*object_attributes*/,
-                            BOOLEAN /*effective_only*/, TOKEN_TYPE type, emulator_object<handle> new_token_handle);
+    NTSTATUS handle_NtDuplicateToken(const syscall_context&, handle existing_token_handle, ACCESS_MASK /*desired_access*/,
+                           emulator_object<OBJECT_ATTRIBUTES<EmulatorTraits<Emu64>>>
+                           /*object_attributes*/,
+                           BOOLEAN /*effective_only*/, TOKEN_TYPE type, emulator_object<handle> new_token_handle);
     NTSTATUS handle_NtQueryInformationToken(const syscall_context& c, handle token_handle, TOKEN_INFORMATION_CLASS token_information_class,
-                                            uint64_t token_information, ULONG token_information_length,
-                                            emulator_object<ULONG> return_length);
+                                           uint64_t token_information, ULONG token_information_length,
+                                           emulator_object<ULONG> return_length);
     NTSTATUS handle_NtQuerySecurityAttributesToken();
+    NTSTATUS handle_NtAdjustPrivilegesToken(const syscall_context& c, handle token_handle, BOOLEAN disable_all_privileges,
+                                           emulator_object<TOKEN_PRIVILEGES> new_state, ULONG buffer_length,
+                                           emulator_object<TOKEN_PRIVILEGES> previous_state,
+                                           emulator_object<ULONG> required_length);
 
     NTSTATUS handle_NtQueryPerformanceCounter(const syscall_context& c, const emulator_object<LARGE_INTEGER> performance_counter,
                                               const emulator_object<LARGE_INTEGER> performance_frequency)
@@ -732,7 +740,7 @@ namespace syscalls
         return STATUS_NOT_SUPPORTED;
     }
 
-    uint64_t handle_NtUserCallTwoParam(const syscall_context& c, const uint64_t w_param, const uint64_t l_param)
+    uint64_t handle_NtUserCallTwoParam(const syscall_context& c, const uint64_t /*w_param*/, const uint64_t /*l_param*/)
     {
         struct PointData
         {
@@ -763,12 +771,28 @@ namespace syscalls
         {
             write_memory_with_callback(c, point_address, position);
         }
-        catch (const std::exception& e)
+        catch (const std::exception&)
         {
             return 0;
         }
 
         return success_status;
+    }
+
+    uint64_t handle_NtUserSetTimer(const syscall_context& c, const hwnd /*window*/, const uint64_t id_event, const uint32_t /*elapse*/, const uint64_t timer_proc)
+    {
+        // Anti-debug bypass: For multimedia timers, immediately dispatch an APC to call the callback
+        if (timer_proc)
+        {
+            c.win_emu.current_thread().pending_apcs.push_back({0, timer_proc, id_event, WM_TIMER, 0});
+        }
+        return id_event > 0 ? id_event : 1;
+    }
+
+    BOOL handle_NtUserKillTimer(const syscall_context& /*c*/, const hwnd /*window*/, const uint64_t /*id_event*/)
+    {
+        // Anti-debug bypass: Always succeed timer kill
+        return TRUE;
     }
     
     NTSTATUS handle_NtUserSetCursor()
@@ -962,13 +986,13 @@ namespace syscalls
     BOOL handle_NtUserGetMessage(const syscall_context& c, const emulator_object<msg> message, const hwnd hwnd, const UINT msg_filter_min,
                                  const UINT msg_filter_max)
     {
+        // Anti-debug bypass: Return FALSE to indicate no messages, breaking timing loops that wait for timer messages
         (void)c;
         (void)message;
         (void)hwnd;
         (void)msg_filter_min;
         (void)msg_filter_max;
-
-        return TRUE;
+        return FALSE;
     }
 
     BOOL handle_NtUserPeekMessage(const syscall_context& c, const emulator_object<msg> message, const hwnd hwnd, const UINT msg_filter_min,
@@ -1080,6 +1104,7 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtOpenProcessToken);
     add_handler(NtOpenProcessTokenEx);
     add_handler(NtQuerySecurityAttributesToken);
+    add_handler(NtAdjustPrivilegesToken);
     add_handler(NtQueryLicenseValue);
     add_handler(NtTestAlert);
     add_handler(NtContinue);
@@ -1118,6 +1143,7 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtRaiseException);
     add_handler(NtQueryInformationJobObject);
     add_handler(NtSetSystemInformation);
+    add_handler(NtPowerInformation);
     add_handler(NtQueryInformationFile);
     add_handler(NtCreateThreadEx);
     add_handler(NtQueryDebugFilterState);
@@ -1227,6 +1253,8 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtGetWriteWatch);
     add_handler(NtResetWriteWatch);
     add_handler(NtQueryInformationAtom);
+    add_handler(NtUserSetTimer);
+    add_handler(NtUserKillTimer);
 
 #undef add_handler
 }

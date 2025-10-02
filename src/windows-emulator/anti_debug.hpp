@@ -105,41 +105,82 @@ struct SYSTEM_THREAD_INFORMATION
 
 struct SYSTEM_PROCESS_INFORMATION
 {
-    ULONG NextEntryOffset;
-    ULONG NumberOfThreads;
-    LARGE_INTEGER WorkingSetPrivateSize;
-    ULONG HardFaultCount;
-    ULONG NumberOfThreadsHighWatermark;
-    ULONGLONG CycleTime;
-    LARGE_INTEGER CreateTime;
-    LARGE_INTEGER UserTime;
-    LARGE_INTEGER KernelTime;
-    UNICODE_STRING<EmulatorTraits<Emu64>> ImageName;
-    LONG BasePriority;
-    HANDLE UniqueProcessId;
-    HANDLE InheritedFromUniqueProcessId;
-    ULONG HandleCount;
-    ULONG SessionId;
-    ULONG_PTR UniqueProcessKey;
-    ULONG_PTR PeakVirtualSize;
-    ULONG_PTR VirtualSize;
-    ULONG PageFaultCount;
-    ULONG_PTR PeakWorkingSetSize;
-    ULONG_PTR WorkingSetSize;
-    ULONG_PTR QuotaPeakPagedPoolUsage;
-    ULONG_PTR QuotaPagedPoolUsage;
-    ULONG_PTR QuotaPeakNonPagedPoolUsage;
-    ULONG_PTR QuotaNonPagedPoolUsage;
-    ULONG_PTR PagefileUsage;
-    ULONG_PTR PeakPagefileUsage;
-    ULONG_PTR PrivatePageCount;
-    LARGE_INTEGER ReadOperationCount;
-    LARGE_INTEGER WriteOperationCount;
-    LARGE_INTEGER OtherOperationCount;
-    LARGE_INTEGER ReadTransferCount;
-    LARGE_INTEGER WriteTransferCount;
-    LARGE_INTEGER OtherTransferCount;
-    SYSTEM_THREAD_INFORMATION Threads[1];
+     ULONG NextEntryOffset;
+     ULONG NumberOfThreads;
+     LARGE_INTEGER WorkingSetPrivateSize;
+     ULONG HardFaultCount;
+     ULONG NumberOfThreadsHighWatermark;
+     ULONGLONG CycleTime;
+     LARGE_INTEGER CreateTime;
+     LARGE_INTEGER UserTime;
+     LARGE_INTEGER KernelTime;
+     UNICODE_STRING<EmulatorTraits<Emu64>> ImageName;
+     LONG BasePriority;
+     HANDLE UniqueProcessId;
+     HANDLE InheritedFromUniqueProcessId;
+     ULONG HandleCount;
+     ULONG SessionId;
+     ULONG_PTR UniqueProcessKey;
+     ULONG_PTR PeakVirtualSize;
+     ULONG_PTR VirtualSize;
+     ULONG PageFaultCount;
+     ULONG_PTR PeakWorkingSetSize;
+     ULONG_PTR WorkingSetSize;
+     ULONG_PTR QuotaPeakPagedPoolUsage;
+     ULONG_PTR QuotaPagedPoolUsage;
+     ULONG_PTR QuotaPeakNonPagedPoolUsage;
+     ULONG_PTR QuotaNonPagedPoolUsage;
+     ULONG_PTR PagefileUsage;
+     ULONG_PTR PeakPagefileUsage;
+     ULONG_PTR PrivatePageCount;
+     LARGE_INTEGER ReadOperationCount;
+     LARGE_INTEGER WriteOperationCount;
+     LARGE_INTEGER OtherOperationCount;
+     LARGE_INTEGER ReadTransferCount;
+     LARGE_INTEGER WriteTransferCount;
+     LARGE_INTEGER OtherTransferCount;
+     SYSTEM_THREAD_INFORMATION Threads[1];
+};
+
+struct SYSTEM_LICENSE_INFORMATION {
+    ULONG LicenseStatus;  // 0 = SL_GEN_STATE_IS_GENUINE
+    ULONG LicenseType;    // License type
+};
+
+struct SYSTEM_POWER_CAPABILITIES
+{
+    BOOLEAN PowerButtonPresent;
+    BOOLEAN SleepButtonPresent;
+    BOOLEAN LidPresent;
+    BOOLEAN SystemS1;
+    BOOLEAN SystemS2;
+    BOOLEAN SystemS3;
+    BOOLEAN SystemS4;
+    BOOLEAN SystemS5;
+    BOOLEAN HiberFilePresent;
+    BOOLEAN FullWake;
+    BOOLEAN VideoDimPresent;
+    BOOLEAN ApmPresent;
+    BOOLEAN UpsPresent;
+    BOOLEAN ThermalControl;
+    BOOLEAN ProcessorThrottle;
+    BYTE ProcessorMinThrottle;
+    BYTE ProcessorMaxThrottle;
+    BOOLEAN FastSystemS4;
+    BYTE spare2[3];
+    BOOLEAN DiskSpinDown;
+    BYTE spare3[8];
+    BOOLEAN SystemBatteriesPresent;
+    BOOLEAN BatteriesAreShortTerm;
+    struct {
+        DWORD Granularity;
+        DWORD Capacity;
+    } BatteryScale[3];
+    DWORD AcOnLineWake;
+    DWORD SoftLidWake;
+    DWORD RtcWake;
+    DWORD MinDeviceWakeState;
+    DWORD DefaultLowLatencyWake;
 };
 
     std::u16string normalize_path(const syscall_context& c, std::u16string_view path);
@@ -184,4 +225,10 @@ struct SYSTEM_PROCESS_INFORMATION
     NTSTATUS handle_SystemFirmwareTableInformation(const syscall_context& c, const uint64_t input_buffer,
                                                    const uint32_t input_buffer_length, const uint64_t system_information,
                                                    const uint32_t system_information_length, const emulator_object<uint32_t> return_length);
+    NTSTATUS handle_SystemLicenseInformation(const syscall_context& c, const uint64_t system_information,
+                                             const uint32_t system_information_length, const emulator_object<uint32_t> return_length);
+    NTSTATUS handle_QueryKeyCachedInformation(const syscall_context& c, const uint64_t key_information, const ULONG length,
+                                              const emulator_object<ULONG> result_length, const handle key_handle);
+    NTSTATUS handle_SystemPowerCapabilities(const syscall_context& c, const uint64_t output_buffer, const ULONG output_buffer_length);
+    BOOL power_capabilities();
 }

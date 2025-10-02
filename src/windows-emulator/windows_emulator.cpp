@@ -438,13 +438,13 @@ void windows_emulator::setup_hooks()
 {
     this->memory.on_write_watch_added = [this](uint64_t address, size_t size) {
         auto* hook = this->emu().hook_memory_write(
-            address, size, [this](uint64_t write_address, const void* data, size_t write_size) {
+            address, size, [this](uint64_t write_address, const void*, size_t) {
                 this->memory.mark_page_as_written(write_address);
             });
         this->write_watch_hooks_[address] = hook;
     };
 
-    this->memory.on_write_watch_removed = [this](uint64_t address, size_t size) {
+    this->memory.on_write_watch_removed = [this](uint64_t address, size_t) {
         auto it = this->write_watch_hooks_.find(address);
         if (it != this->write_watch_hooks_.end())
         {

@@ -381,6 +381,13 @@ void tenet_tracer::process_instruction(const uint64_t address)
     }
 
     raw_log_buffer_.push_back(trace_line.str());
+
+    // Prevent memory exhaustion by flushing periodically
+    if (raw_log_buffer_.size() >= 1000000)
+    {
+        filter_and_write_buffer();
+    }
+
     previous_registers_ = current_regs;
 
     mem_read_log_.str("");

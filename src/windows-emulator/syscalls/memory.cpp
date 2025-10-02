@@ -309,7 +309,7 @@ namespace syscalls
     }
 
     NTSTATUS handle_NtGetWriteWatch(const syscall_context& c, const handle process_handle, uint32_t flags,
-                                      uint64_t base_address, uint64_t region_size,
+                                      uint64_t base_address, uint64_t /*region_size*/,
                                       uint64_t user_addresses_ptr, emulator_object<uint64_t> number_of_entries,
                                       emulator_object<uint32_t> granularity)
     {
@@ -362,7 +362,7 @@ namespace syscalls
         }
     }
     NTSTATUS handle_NtResetWriteWatch(const syscall_context& c, const handle process_handle, uint64_t base_address,
-                                        uint64_t region_size)
+                                        uint64_t /*region_size*/)
     {
         if (process_handle != CURRENT_PROCESS &&
             (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
