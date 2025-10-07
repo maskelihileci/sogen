@@ -16,16 +16,6 @@ namespace
         return std::equal(suffix.rbegin(), suffix.rend(), str.rbegin(),
                           [](char16_t a, char16_t b) { return std::tolower(a) == std::tolower(b); });
     }
-
-    uint8_t calculate_checksum(const uint8_t* data, size_t length)
-    {
-        uint8_t sum = 0;
-        for (size_t i = 0; i < length; ++i)
-        {
-            sum += data[i];
-        }
-        return -sum;
-    }
 }
 
 namespace anti_debug
@@ -322,195 +312,378 @@ namespace anti_debug
     }
 
     NTSTATUS handle_SystemFirmwareTableInformation(const syscall_context& c, const uint64_t input_buffer,
-                                                   const uint32_t input_buffer_length, const uint64_t system_information,
-                                                   const uint32_t system_information_length, const emulator_object<uint32_t> return_length)
+                                                 const uint32_t input_buffer_length, const uint64_t system_information,
+                                                 const uint32_t system_information_length, [[maybe_unused]] const emulator_object<uint32_t> return_length)
     {
-        SYSTEM_FIRMWARE_TABLE_INFORMATION request_data{};
 
-        // If input_buffer is provided, read the request data
+        SYSTEM_FIRMWARE_TABLE_INFORMATION table_info{};
+
+        // Try to read the input buffer if it exists and has sufficient length
         if (input_buffer && input_buffer_length >= sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION))
         {
-            const auto mem_data = c.emu.read_memory(input_buffer, sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION));
-            memcpy(&request_data, mem_data.data(), sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION));
+            table_info = c.emu.read_memory<SYSTEM_FIRMWARE_TABLE_INFORMATION>(input_buffer);
         }
         else
         {
-            // Default to enumeration if no input buffer or invalid
-            request_data.Action = SystemFirmwareTableEnumerate;
-            request_data.ProviderSignature = 0x49435041; // 'ACPI'
+            // GetSystemFirmwareTable calls NtQuerySystemInformation with input_buffer containing SYSTEM_FIRMWARE_TABLE_INFORMATION
+            // But sometimes input_buffer is NULL, default to Get action for SMBIOS data
+            table_info.ProviderSignature = RSMB_SIGNATURE;
+            table_info.Action = SystemFirmwareTableGet; // Default to Get for SMBIOS data
+            table_info.TableID = 0x0000; // Default SMBIOS table ID
+            table_info.TableBufferLength = system_information_length; // Use provided buffer length
         }
 
-        if (request_data.Action == SystemFirmwareTableEnumerate)
+        // Handle RSMB (Raw SMBIOS) signature
+        if (table_info.ProviderSignature == RSMB_SIGNATURE)
         {
-            // Enumeration: return array of table IDs for ACPI provider
-            // Al-khaser checks ACPI firmware tables, so return ACPI table IDs
-            const std::vector<DWORD> tables = { 0x50434146, 0x43495041, 0x54455048 }; // 'FACP', 'APIC', 'HPET'
-
-            const size_t total_size = tables.size() * sizeof(DWORD);
-
-            if (return_length)
+            // IMPORTANT: Check TableID - only support TableID 0 for SMBIOS
+            if (table_info.TableID != 0)
             {
-                return_length.write(static_cast<ULONG>(total_size));
+                return STATUS_NOT_SUPPORTED;
             }
 
-            if (system_information_length < total_size)
+            if (table_info.Action == SystemFirmwareTableEnumerate)
             {
-                return STATUS_BUFFER_TOO_SMALL;
-            }
 
-            write_memory_with_callback(c, system_information, tables.data(), total_size);
-            return STATUS_SUCCESS;
-        }
-        else if (request_data.Action == SystemFirmwareTableGet)
-        {
-            if (request_data.ProviderSignature == 0x424D5352) // 'RSMB' for SMBIOS
+                return STATUS_NOT_SUPPORTED;
+            }
+            else if (table_info.Action == SystemFirmwareTableGet)
             {
-                if (request_data.TableID != 0)
-                {
-                    return STATUS_NOT_SUPPORTED;
+
+                // (RawSMBIOSData format for compatibility with provided code)
+                // Increased buffer size for more tables
+                std::vector<uint8_t> tableData(16384); // Larger buffer for comprehensive SMBIOS data
+
+                uint8_t* tablePtr = tableData.data();
+                uint16_t handleCounter = 0;
+
+                // Type 0: BIOS Information
+                SMBIOS_BIOS_INFORMATION* bios = (SMBIOS_BIOS_INFORMATION*)tablePtr;
+                bios->Type = 0;
+                bios->Length = 24;
+                bios->Handle = handleCounter++;
+                bios->Vendor = 1; // String index
+                bios->BIOSVersion = 2;
+                bios->BIOSStartingAddressSegment = 0xE800;
+                bios->BIOSReleaseDate = 3;
+                bios->BIOSROMSize = 16; // 16*64KB = 1MB
+                bios->BIOSCharacteristics = 0x0800000000000000ULL; // Supports UEFI
+                bios->BIOSCharacteristicsExtensionBytes = 0x0003;
+                bios->SystemBIOSMajorRelease = 2;
+                bios->SystemBIOSMinorRelease = 7;
+                bios->EmbeddedControllerFirmwareMajorRelease = 0xFF;
+                bios->EmbeddedControllerFirmwareMinorRelease = 0xFF;
+                tablePtr += 24;
+
+                // Type 1: System Information
+                SMBIOS_SYSTEM_INFORMATION* sys = (SMBIOS_SYSTEM_INFORMATION*)tablePtr;
+                sys->Type = 1;
+                sys->Length = 27;
+                sys->Handle = handleCounter++;
+                sys->Manufacturer = 1;
+                sys->ProductName = 2;
+                sys->Version = 3;
+                sys->SerialNumber = 4;
+                memset(sys->UUID, 0xFF, 16); // Invalid UUID for VM
+                sys->WakeUpType = 6; // Power Switch
+                sys->SKUNumber = 5;
+                sys->Family = 6;
+                tablePtr += 27;
+
+                // Type 2: Base Board Information
+                SMBIOS_BASEBOARD_INFORMATION* board = (SMBIOS_BASEBOARD_INFORMATION*)tablePtr;
+                board->Type = 2;
+                board->Length = 15;
+                board->Handle = handleCounter++;
+                board->Manufacturer = 1;
+                board->Product = 2;
+                board->Version = 3;
+                board->SerialNumber = 4;
+                board->AssetTag = 5;
+                board->FeatureFlags = 0x09; // Hosting board, replaceable
+                board->LocationInChassis = 1;
+                board->ChassisHandle = handleCounter + 1; // Next handle will be chassis
+                board->BoardType = 10; // Motherboard
+                board->NumberOfContainedObjectHandles = 0;
+                tablePtr += 15;
+
+                // Type 3: Chassis Information
+                // Simplified chassis structure
+                *tablePtr++ = 3; // Type
+                *tablePtr++ = 21; // Length
+                *tablePtr++ = handleCounter & 0xFF; *tablePtr++ = (handleCounter >> 8) & 0xFF; handleCounter++; // Handle
+                *tablePtr++ = 1; // Manufacturer
+                *tablePtr++ = 2; // Type (Desktop)
+                *tablePtr++ = 3; // Version
+                *tablePtr++ = 4; // Serial Number
+                *tablePtr++ = 5; // Asset Tag
+                *tablePtr++ = 2; // Boot-up State (Safe)
+                *tablePtr++ = 2; // Power Supply State (Safe)
+                *tablePtr++ = 2; // Thermal State (Safe)
+                *tablePtr++ = 2; // Security Status (Unknown)
+                *tablePtr++ = 0; *tablePtr++ = 0; *tablePtr++ = 0; *tablePtr++ = 0; // OEM defined
+                *tablePtr++ = 1; // Height
+                *tablePtr++ = 0; // Number of Power Cords
+
+                // Type 4: Processor Information (multiple processors)
+                for(int proc = 0; proc < 4; proc++) {
+                    SMBIOS_PROCESSOR_INFORMATION* processor = (SMBIOS_PROCESSOR_INFORMATION*)tablePtr;
+                    processor->Type = 4;
+                    processor->Length = 42;
+                    processor->Handle = handleCounter++;
+                    processor->SocketDesignation = 1;
+                    processor->ProcessorType = 3; // Central Processor
+                    processor->ProcessorFamily = 0xC6; // Core i7 equivalent
+                    processor->ProcessorManufacturer = 2;
+                    processor->ProcessorID = 0x123456789ABCDEF0ULL;
+                    processor->ProcessorVersion = 3;
+                    processor->Voltage = 0x80; // 1.2V
+                    processor->ExternalClock = 100;
+                    processor->MaxSpeed = 4000;
+                    processor->CurrentSpeed = 3500;
+                    processor->Status = 0x41; // Enabled, CPU Socket Populated
+                    processor->ProcessorUpgrade = 1; // Other
+                    tablePtr += 42;
                 }
 
-                const size_t eps_size = 0x1F;
-                const size_t table_size = sizeof(smbios_data) - eps_size;
-                const size_t total_size = eps_size + table_size;
+                // Type 7: Cache Information (multiple caches)
+                for(int cache = 0; cache < 6; cache++) {
+                    SMBIOS_CACHE_INFORMATION* cacheInfo = (SMBIOS_CACHE_INFORMATION*)tablePtr;
+                    cacheInfo->Type = 7;
+                    cacheInfo->Length = 19;
+                    cacheInfo->Handle = handleCounter++;
+                    cacheInfo->SocketDesignation = 1;
+                    cacheInfo->CacheConfiguration = 0x0180; // Enabled, Not Socketed
+                    cacheInfo->MaximumCacheSize = 8192; // 8MB
+                    cacheInfo->InstalledSize = 8192;
+                    cacheInfo->SupportedSRAMType = 0x0004; // Synchronous
+                    cacheInfo->CurrentSRAMType = 0x0004;
+                    tablePtr += 19;
+                }
+
+                // Type 8: Port Connector Information (multiple ports)
+                for(int port = 0; port < 8; port++) {
+                    SMBIOS_PORT_CONNECTOR_INFORMATION* portInfo = (SMBIOS_PORT_CONNECTOR_INFORMATION*)tablePtr;
+                    portInfo->Type = 8;
+                    portInfo->Length = 9;
+                    portInfo->Handle = handleCounter++;
+                    portInfo->InternalReferenceDesignator = 1;
+                    portInfo->InternalConnectorType = 0x0A; // RJ-45
+                    portInfo->ExternalReferenceDesignator = 2;
+                    portInfo->ExternalConnectorType = 0x0A; // RJ-45
+                    portInfo->PortType = 0x1D; // Network Port
+                    tablePtr += 9;
+                }
+
+                // Type 9: System Slots (multiple slots)
+                for(int slot = 0; slot < 6; slot++) {
+                    SMBIOS_SYSTEM_SLOT* slotInfo = (SMBIOS_SYSTEM_SLOT*)tablePtr;
+                    slotInfo->Type = 9;
+                    slotInfo->Length = 13;
+                    slotInfo->Handle = handleCounter++;
+                    slotInfo->SlotDesignation = 1;
+                    slotInfo->SlotType = 0x0D; // PCI Express
+                    slotInfo->SlotDataBusWidth = 0x0E; // x16
+                    slotInfo->CurrentUsage = 1; // Available
+                    slotInfo->SlotLength = 3; // Short
+                    slotInfo->SlotID = static_cast<uint16_t>(slot);
+                    slotInfo->SlotCharacteristics1 = 0x0A; // PME signal, SMBus signal
+                    tablePtr += 13;
+                }
+
+                // Type 10: On Board Devices Information
+                for(int device = 0; device < 5; device++) {
+                    SMBIOS_ONBOARD_DEVICES* deviceInfo = (SMBIOS_ONBOARD_DEVICES*)tablePtr;
+                    deviceInfo->Type = 10;
+                    deviceInfo->Length = 6;
+                    deviceInfo->Handle = handleCounter++;
+                    deviceInfo->DeviceType = 0x0A | (0x01 << 7); // Ethernet, enabled
+                    deviceInfo->DescriptionString = static_cast<uint8_t>(device + 1);
+                    tablePtr += 6;
+                }
+
+                // Type 11: OEM Strings
+                SMBIOS_OEM_STRINGS* oem = (SMBIOS_OEM_STRINGS*)tablePtr;
+                oem->Type = 11;
+                oem->Length = 5;
+                oem->Handle = handleCounter++;
+                oem->Count = 3;
+                tablePtr += 5;
+
+                // Type 12: System Configuration Options
+                SMBIOS_SYSTEM_CONFIGURATION_OPTIONS* config = (SMBIOS_SYSTEM_CONFIGURATION_OPTIONS*)tablePtr;
+                config->Type = 12;
+                config->Length = 5;
+                config->Handle = handleCounter++;
+                config->Count = 2;
+                tablePtr += 5;
+
+                // Type 13: BIOS Language Information
+                SMBIOS_BIOS_LANGUAGE* lang = (SMBIOS_BIOS_LANGUAGE*)tablePtr;
+                lang->Type = 13;
+                lang->Length = 22;
+                lang->Handle = handleCounter++;
+                lang->InstallableLanguages = 1;
+                lang->Flags = 0;
+                memset(lang->Reserved, 0, 15);
+                lang->CurrentLanguage = 1;
+                tablePtr += 22;
+
+                // Type 14: Group Associations (multiple groups)
+                for(int group = 0; group < 3; group++) {
+                    SMBIOS_GROUP_ASSOCIATIONS* groupInfo = (SMBIOS_GROUP_ASSOCIATIONS*)tablePtr;
+                    groupInfo->Type = 14;
+                    groupInfo->Length = 5;
+                    groupInfo->Handle = handleCounter++;
+                    groupInfo->GroupName = 1;
+                    groupInfo->ItemType = 0;
+                    groupInfo->ItemHandle = 0;
+                    tablePtr += 5;
+                }
+
+                // Type 15: System Event Log
+                SMBIOS_SYSTEM_EVENT_LOG* eventLog = (SMBIOS_SYSTEM_EVENT_LOG*)tablePtr;
+                eventLog->Type = 15;
+                eventLog->Length = 23;
+                eventLog->Handle = handleCounter++;
+                eventLog->LogAreaLength = 0;
+                eventLog->LogHeaderStartOffset = 0;
+                eventLog->LogDataStartOffset = 0;
+                eventLog->AccessMethod = 0;
+                eventLog->LogStatus = 0;
+                eventLog->LogChangeToken = 0;
+                eventLog->AccessMethodAddress = 0;
+                eventLog->LogHeaderFormat = 0;
+                eventLog->NumberOfSupportedLogTypeDescriptors = 0;
+                eventLog->LengthOfLogTypeDescriptor = 0;
+                tablePtr += 23;
+
+                // Type 16: Physical Memory Array
+                SMBIOS_PHYSICAL_MEMORY_ARRAY* memArray = (SMBIOS_PHYSICAL_MEMORY_ARRAY*)tablePtr;
+                memArray->Type = 16;
+                memArray->Length = 15;
+                memArray->Handle = handleCounter++;
+                memArray->Location = 0x03;  // System board
+                memArray->Use = 0x03;       // System memory
+                memArray->MemoryErrorCorrection = 0x06;  // None
+                memArray->MaximumCapacity = 0x00200000;  // 8GB in KB
+                memArray->MemoryErrorInformationHandle = 0xFFFE;
+                memArray->NumberOfMemoryDevices = 2;
+                tablePtr += 15;
+
+                // Type 17: Memory Device (multiple devices)
+                for(int mem = 0; mem < 2; mem++) {
+                    SMBIOS_MEMORY_DEVICE* memDevice = (SMBIOS_MEMORY_DEVICE*)tablePtr;
+                    memDevice->Type = 17;
+                    memDevice->Length = 34; // Extended for DDR4
+                    memDevice->Handle = handleCounter++;
+                    memDevice->PhysicalMemoryArrayHandle = handleCounter - 2; // Reference to memory array
+                    memDevice->MemoryErrorInformationHandle = 0xFFFE;
+                    memDevice->TotalWidth = 64;
+                    memDevice->DataWidth = 64;
+                    memDevice->Size = 0x1000;  // 4096 MB
+                    memDevice->FormFactor = 0x09;  // DIMM
+                    memDevice->DeviceSet = static_cast<uint8_t>(mem);
+                    memDevice->DeviceLocator = 1;
+                    memDevice->BankLocator = 2;
+                    memDevice->MemoryType = 0x1A;  // DDR4
+                    memDevice->TypeDetail = 0x0080;
+                    memDevice->Speed = 2133;
+                    memDevice->Manufacturer = 3;
+                    memDevice->SerialNumber = 4;
+                    memDevice->AssetTag = 5;
+                    memDevice->PartNumber = 6;
+                    memDevice->Attributes = 0;
+                    memDevice->ExtendedSize = 0;
+                    memDevice->ConfiguredMemoryClockSpeed = 2133;
+                    tablePtr += 34;
+                }
+
+                // Add more dummy tables to reach 40+ total tables
+                // Types 18-126: Various SMBIOS structures
+                for(int type = 18; type < 127; type++) {
+                    if(type == 127) break; // End marker
+                    uint8_t dummyLength = 8; // Minimum structure size
+                    *tablePtr++ = static_cast<uint8_t>(type);
+                    *tablePtr++ = dummyLength;
+                    *tablePtr++ = static_cast<uint8_t>(handleCounter & 0xFF);
+                    *tablePtr++ = static_cast<uint8_t>((handleCounter >> 8) & 0xFF);
+                    handleCounter++;
+                    // Fill remaining bytes with zeros
+                    for(int i = 3; i < dummyLength; i++) {
+                        *tablePtr++ = 0;
+                    }
+                    // String terminator
+                    *tablePtr++ = 0;
+                }
+
+                // Now add all the strings at the end
+                const char* allStrings[] = {
+                    "American Megatrends Inc.", "07/15/2023", "A.B0", "System Manufacturer", "System Product Name",
+                    "System Version", "System Serial Number", "SKU Number", "Family", "To Be Filled By O.E.M.",
+                    "Intel(R) Corporation", "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz", "LGA1151", "CPU Internal L2",
+                    "CPU Internal L1", "Ethernet Controller", "USB Controller", "SATA Controller", "Audio Controller",
+                    "VGA Controller", "Manufacturer", "DIMM_A1", "BANK 0", "BANK 1", "Manufacturer", "12345678",
+                    "AssetTag", "PartNumber", "BANK 2", "BANK 3", "BANK 4", "BANK 5", "BANK 6", "BANK 7",
+                    "BANK 8", "BANK 9", "BANK 10", "BANK 11", "BANK 12", "BANK 13", "BANK 14", "BANK 15",
+                    nullptr
+                };
+
+                for(int i = 0; allStrings[i]; i++) {
+                    strcpy((char*)tablePtr, allStrings[i]);
+                    tablePtr += strlen(allStrings[i]) + 1;
+                }
+                *tablePtr++ = 0;  // Final string terminator
+
+                // Type 127: End of Table
+                *tablePtr++ = 127;
+                *tablePtr++ = 4;
+                *tablePtr++ = 0;
+                *tablePtr++ = 0;
+                *tablePtr++ = 0;
+                *tablePtr++ = 0;
+
+                uint32_t tableDataLength = (uint32_t)(tablePtr - tableData.data());
+
+                // RawSMBIOSData structure
+                struct RawSMBIOSData {
+                    BYTE method;       // Access method (obsolete)
+                    BYTE mjVer;        // Major version
+                    BYTE mnVer;        // Minor version
+                    BYTE dmiRev;       // DMI revision (obsolete)
+                    DWORD length;      // Table data size
+                    BYTE tableData[1]; // Variable table data
+                };
+
+                RawSMBIOSData raw{};
+                raw.method = 0;
+                raw.mjVer = 2;
+                raw.mnVer = 7;
+                raw.dmiRev = 0;
+                raw.length = tableDataLength;
+
+                const size_t required_size = sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION) - 1 + sizeof(RawSMBIOSData) - 1 + tableDataLength;
 
                 if (return_length)
                 {
-                    return_length.write(static_cast<ULONG>(total_size));
+                    return_length.write(static_cast<ULONG>(required_size));
                 }
 
-                if (system_information_length < total_size)
+                if (system_information_length < required_size)
                 {
                     return STATUS_BUFFER_TOO_SMALL;
                 }
 
-                // Copy EPS
-                uint8_t eps[0x1F];
-                memcpy(eps, smbios_data, eps_size);
+                SYSTEM_FIRMWARE_TABLE_INFORMATION output_struct{};
+                output_struct.ProviderSignature = table_info.ProviderSignature;
+                output_struct.Action = table_info.Action;
+                output_struct.TableID = table_info.TableID;
+                output_struct.TableBufferLength = sizeof(RawSMBIOSData) - 1 + tableDataLength;
 
-                // Calculate checksums
-                eps[4] = calculate_checksum(eps, 0x10); // EPS checksum
-                eps[5] = 0x1F; // Length already set
-                // Update table length and address
-                const uint16_t table_len = static_cast<uint16_t>(table_size);
-                eps[0x16] = table_len & 0xFF;
-                eps[0x17] = (table_len >> 8) & 0xFF;
-                const uint32_t table_addr = static_cast<uint32_t>(system_information + eps_size);
-                eps[0x18] = table_addr & 0xFF;
-                eps[0x19] = (table_addr >> 8) & 0xFF;
-                eps[0x1A] = (table_addr >> 16) & 0xFF;
-                eps[0x1B] = (table_addr >> 24) & 0xFF;
-                eps[0x1C] = 2; // Number of structures (Type 16 and 17)
-                eps[0x1D] = 0;
+                write_memory_with_callback(c, system_information, &output_struct, sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION) - 1);
+                write_memory_with_callback(c, system_information + sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION) - 1, &raw, sizeof(RawSMBIOSData) - 1);
+                write_memory_with_callback(c, system_information + sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION) - 1 + sizeof(RawSMBIOSData) - 1, tableData.data(), tableDataLength);
 
-                // Intermediate checksum
-                eps[0x11] = calculate_checksum(eps + 0x10, 0x0F);
-
-                write_memory_with_callback(c, system_information, eps, eps_size);
-
-                // Copy table data
-                write_memory_with_callback(c, system_information + eps_size, smbios_data + eps_size, table_size);
-
-                return STATUS_SUCCESS;
-            }
-            else if (request_data.ProviderSignature == 0x49435041) // 'ACPI'
-            {
-                // Return different ACPI tables based on TableID
-                std::vector<uint8_t> table_data;
-
-                if (request_data.TableID == 0x50434146) // 'FACP' - Fixed ACPI Description Table
-                {
-                    // Minimal FACP structure
-                    const uint8_t facp[] = {
-                        'F', 'A', 'C', 'P',           // Signature
-                        0x74, 0x00, 0x00, 0x00,       // Length (116)
-                        0x01,                         // Revision
-                        0x00,                         // Checksum
-                        'A', 'C', 'P', 'I',           // OEM ID
-                        'T', 'A', 'B', 'L', 'E', 0, 0, 0, // OEM Table ID
-                        0x01, 0x00, 0x00, 0x00,       // OEM Revision
-                        0x00, 0x00, 0x00, 0x00,       // Creator ID
-                        0x01, 0x00, 0x00, 0x00,       // Creator Revision
-                        // ... minimal FACP content
-                    };
-                    table_data.assign(facp, facp + sizeof(facp));
-                }
-                else if (request_data.TableID == 0x43495041) // 'APIC' - Multiple APIC Description Table
-                {
-                    // Minimal MADT structure
-                    const uint8_t madt[] = {
-                        'A', 'P', 'I', 'C',           // Signature
-                        0x2C, 0x00, 0x00, 0x00,       // Length (44)
-                        0x01,                         // Revision
-                        0x00,                         // Checksum
-                        'A', 'C', 'P', 'I',           // OEM ID
-                        'T', 'A', 'B', 'L', 'E', 0, 0, 0, // OEM Table ID
-                        0x01, 0x00, 0x00, 0x00,       // OEM Revision
-                        0x00, 0x00, 0x00, 0x00,       // Creator ID
-                        0x01, 0x00, 0x00, 0x00,       // Creator Revision
-                        0x00, 0x00, 0x00, 0x00,       // Local APIC Address
-                        0x00, 0x00, 0x00, 0x01        // Flags
-                    };
-                    table_data.assign(madt, madt + sizeof(madt));
-                }
-                else if (request_data.TableID == 0x54455048) // 'HPET' - High Precision Event Timer
-                {
-                    // Minimal HPET structure
-                    const uint8_t hpet[] = {
-                        'H', 'P', 'E', 'T',           // Signature
-                        0x38, 0x00, 0x00, 0x00,       // Length (56)
-                        0x01,                         // Revision
-                        0x00,                         // Checksum
-                        'A', 'C', 'P', 'I',           // OEM ID
-                        'T', 'A', 'B', 'L', 'E', 0, 0, 0, // OEM Table ID
-                        0x01, 0x00, 0x00, 0x00,       // OEM Revision
-                        0x00, 0x00, 0x00, 0x00,       // Creator ID
-                        0x01, 0x00, 0x00, 0x00,       // Creator Revision
-                        0x00, 0x00, 0x00, 0x80,       // Hardware Rev ID + Comparator Count + Counter Size + Reserved + Legacy Replacement Capable
-                        0x00, 0x00,                   // PCI Vendor ID
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Base Address
-                        0x00, 0x00, 0x00, 0x00,       // HPET Number
-                        0x00, 0x00, 0x00, 0x00,       // Min Clock Tick
-                        0x00                          // Page Protection
-                    };
-                    table_data.assign(hpet, hpet + sizeof(hpet));
-                }
-                else
-                {
-                    // Default: return a minimal generic ACPI table
-                    const uint8_t generic[] = {
-                        'X', 'X', 'X', 'X',           // Signature (placeholder)
-                        0x24, 0x00, 0x00, 0x00,       // Length (36)
-                        0x01,                         // Revision
-                        0x00,                         // Checksum
-                        'A', 'C', 'P', 'I',           // OEM ID
-                        'T', 'A', 'B', 'L', 'E', 0, 0, 0, // OEM Table ID
-                        0x01, 0x00, 0x00, 0x00,       // OEM Revision
-                        0x00, 0x00, 0x00, 0x00,       // Creator ID
-                        0x01, 0x00, 0x00, 0x00        // Creator Revision
-                    };
-                    table_data.assign(generic, generic + sizeof(generic));
-                }
-
-                // Calculate checksum for the table
-                if (!table_data.empty())
-                {
-                    table_data[9] = calculate_checksum(table_data.data(), table_data.size());
-                }
-
-                const size_t total_size = table_data.size();
-
-                if (return_length)
-                {
-                    return_length.write(static_cast<ULONG>(total_size));
-                }
-
-                if (system_information_length < total_size)
-                {
-                    return STATUS_BUFFER_TOO_SMALL;
-                }
-
-                write_memory_with_callback(c, system_information, table_data.data(), total_size);
                 return STATUS_SUCCESS;
             }
         }

@@ -14,6 +14,8 @@ namespace anti_debug
          SystemFirmwareTableGet = 1,
     };
 
+    const ULONG RSMB_SIGNATURE = 0x52534D42; // 'R' 'S' 'M' 'B' in little endian
+
     struct SYSTEM_FIRMWARE_TABLE_INFORMATION
     {
         ULONG ProviderSignature;
@@ -34,59 +36,202 @@ namespace anti_debug
         ULONGLONG PeakCommitmentBytes;
     };
 
-    // Simple SMBIOS data for memory detection bypass
-    const uint8_t smbios_data[] = {
-        // SMBIOS Entry Point Structure (EPS) 2.0
-        '_', 'S', 'M', '_',           // Anchor
-        0x00,                         // Checksum (calculated below)
-        0x1F,                         // Length
-        0x02,                         // Major Version
-        0x06,                         // Minor Version
-        0xFF, 0xFF,                   // Max Structure Size
-        0x00,                         // Entry Point Revision
-        0x00, 0x00, 0x00, 0x00, 0x00, // Formatted Area
-        '_', 'D', 'M', 'I', '_',       // Intermediate Anchor
-        0x00,                         // Intermediate Checksum (calculated below)
-        0x00, 0x00,                   // Table Length (calculated below)
-        0x00, 0x00, 0x00, 0x00,       // Table Address (calculated below)
-        0x00, 0x00,                   // Number of Structures
-        0x26,                         // BCD Revision
+struct SMBIOS_PHYSICAL_MEMORY_ARRAY {
+    uint8_t Type;                // 16
+    uint8_t Length;              // 15
+    uint16_t Handle;
+    uint8_t Location;
+    uint8_t Use;
+    uint8_t MemoryErrorCorrection;
+    uint32_t MaximumCapacity;
+    uint16_t MemoryErrorInformationHandle;
+    uint16_t NumberOfMemoryDevices;
+};
 
-        // Type 16: Physical Memory Array
-        16,                           // Type
-        15,                           // Length
-        0x00, 0x00,                   // Handle
-        0x01,                         // Location: Other
-        0x03,                         // Use: System Memory
-        0x06,                         // Memory Error Correction: Not Applicable
-        0x00, 0x00, 0x20, 0x00,       // Maximum Capacity: 8GB (in KB)
-        0xFE, 0xFF,                   // Memory Error Information Handle
-        0x01,                         // Number of Memory Devices
+struct SMBIOS_MEMORY_DEVICE {
+    uint8_t Type;                // 17
+    uint8_t Length;              // 28+
+    uint16_t Handle;
+    uint16_t PhysicalMemoryArrayHandle;
+    uint16_t MemoryErrorInformationHandle;
+    uint16_t TotalWidth;
+    uint16_t DataWidth;
+    uint16_t Size;
+    uint8_t FormFactor;
+    uint8_t DeviceSet;
+    uint8_t DeviceLocator;
+    uint8_t BankLocator;
+    uint8_t MemoryType;
+    uint16_t TypeDetail;
+    uint16_t Speed;
+    uint8_t Manufacturer;
+    uint8_t SerialNumber;
+    uint8_t AssetTag;
+    uint8_t PartNumber;
+    uint8_t Attributes;
+    uint32_t ExtendedSize;
+    uint16_t ConfiguredMemoryClockSpeed;
+};
 
-        // Type 17: Memory Device
-        17,                           // Type
-        28,                           // Length
-        0x01, 0x00,                   // Handle
-        0x00, 0x00,                   // Memory Array Handle
-        0xFE, 0xFF,                   // Memory Error Information Handle
-        64, 0,                        // Total Width
-        64, 0,                        // Data Width
-        0x00, 0x20,                   // Size: 8192 MB
-        0x09,                         // Form Factor: DIMM
-        0x00,                         // Device Set
-        'D', 'I', 'M', 'M', 0, 0, 0, 0, 0, 0, 0, 0, // Device Locator
-        'B', 'A', 'N', 'K', ' ', '0', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // Bank Locator
-        0x1A,                         // Memory Type: DDR4
-        0x80, 0x00,                   // Type Detail
-        0x55, 0x08,                   // Speed: 2133 MT/s
-        'M', 'a', 'n', 'u', 'f', 'a', 'c', 't', 'u', 'r', 'e', 'r', 0, 0, 0, 0, // Manufacturer
-        '1', '2', '3', '4', '5', '6', '7', '8', 0, 0, 0, 0, 0, 0, 0, 0, // Serial Number
-        'A', 's', 's', 'e', 't', 'T', 'a', 'g', 0, 0, 0, 0, 0, 0, 0, 0, // Asset Tag
-        'P', 'a', 'r', 't', 'N', 'u', 'm', 'b', 'e', 'r', 0, 0, 0, 0, 0, 0, // Part Number
-        0x00,                         // Attributes
-        0x00, 0x00, 0x00, 0x00,       // Extended Size
-        0x55, 0x08,                   // Configured Memory Clock Speed
-    };    
+// Additional SMBIOS structures for anti-debug bypass
+struct SMBIOS_BIOS_INFORMATION {
+    uint8_t Type;                // 0
+    uint8_t Length;              // 18+
+    uint16_t Handle;
+    uint8_t Vendor;
+    uint8_t BIOSVersion;
+    uint16_t BIOSStartingAddressSegment;
+    uint8_t BIOSReleaseDate;
+    uint8_t BIOSROMSize;
+    uint64_t BIOSCharacteristics;
+    uint16_t BIOSCharacteristicsExtensionBytes;
+    uint8_t SystemBIOSMajorRelease;
+    uint8_t SystemBIOSMinorRelease;
+    uint8_t EmbeddedControllerFirmwareMajorRelease;
+    uint8_t EmbeddedControllerFirmwareMinorRelease;
+};
+
+struct SMBIOS_SYSTEM_INFORMATION {
+    uint8_t Type;                // 1
+    uint8_t Length;              // 27
+    uint16_t Handle;
+    uint8_t Manufacturer;
+    uint8_t ProductName;
+    uint8_t Version;
+    uint8_t SerialNumber;
+    uint8_t UUID[16];
+    uint8_t WakeUpType;
+    uint8_t SKUNumber;
+    uint8_t Family;
+};
+
+struct SMBIOS_BASEBOARD_INFORMATION {
+    uint8_t Type;                // 2
+    uint8_t Length;              // 15+
+    uint16_t Handle;
+    uint8_t Manufacturer;
+    uint8_t Product;
+    uint8_t Version;
+    uint8_t SerialNumber;
+    uint8_t AssetTag;
+    uint8_t FeatureFlags;
+    uint8_t LocationInChassis;
+    uint16_t ChassisHandle;
+    uint8_t BoardType;
+    uint8_t NumberOfContainedObjectHandles;
+};
+
+struct SMBIOS_PROCESSOR_INFORMATION {
+    uint8_t Type;                // 4
+    uint8_t Length;              // 26+
+    uint16_t Handle;
+    uint8_t SocketDesignation;
+    uint8_t ProcessorType;
+    uint8_t ProcessorFamily;
+    uint8_t ProcessorManufacturer;
+    uint64_t ProcessorID;
+    uint8_t ProcessorVersion;
+    uint8_t Voltage;
+    uint16_t ExternalClock;
+    uint16_t MaxSpeed;
+    uint16_t CurrentSpeed;
+    uint8_t Status;
+    uint8_t ProcessorUpgrade;
+};
+
+struct SMBIOS_CACHE_INFORMATION {
+    uint8_t Type;                // 7
+    uint8_t Length;              // 19
+    uint16_t Handle;
+    uint8_t SocketDesignation;
+    uint16_t CacheConfiguration;
+    uint16_t MaximumCacheSize;
+    uint16_t InstalledSize;
+    uint16_t SupportedSRAMType;
+    uint16_t CurrentSRAMType;
+};
+
+struct SMBIOS_PORT_CONNECTOR_INFORMATION {
+    uint8_t Type;                // 8
+    uint8_t Length;              // 9
+    uint16_t Handle;
+    uint8_t InternalReferenceDesignator;
+    uint8_t InternalConnectorType;
+    uint8_t ExternalReferenceDesignator;
+    uint8_t ExternalConnectorType;
+    uint8_t PortType;
+};
+
+struct SMBIOS_SYSTEM_SLOT {
+    uint8_t Type;                // 9
+    uint8_t Length;              // 13
+    uint16_t Handle;
+    uint8_t SlotDesignation;
+    uint8_t SlotType;
+    uint8_t SlotDataBusWidth;
+    uint8_t CurrentUsage;
+    uint8_t SlotLength;
+    uint16_t SlotID;
+    uint8_t SlotCharacteristics1;
+};
+
+struct SMBIOS_ONBOARD_DEVICES {
+    uint8_t Type;                // 10
+    uint8_t Length;              // 6
+    uint16_t Handle;
+    uint8_t DeviceType;
+    uint8_t DescriptionString;
+};
+
+struct SMBIOS_OEM_STRINGS {
+    uint8_t Type;                // 11
+    uint8_t Length;              // 5
+    uint16_t Handle;
+    uint8_t Count;
+};
+
+struct SMBIOS_SYSTEM_CONFIGURATION_OPTIONS {
+    uint8_t Type;                // 12
+    uint8_t Length;              // 5
+    uint16_t Handle;
+    uint8_t Count;
+};
+
+struct SMBIOS_BIOS_LANGUAGE {
+    uint8_t Type;                // 13
+    uint8_t Length;              // 22
+    uint16_t Handle;
+    uint8_t InstallableLanguages;
+    uint8_t Flags;
+    uint8_t Reserved[15];
+    uint8_t CurrentLanguage;
+};
+
+struct SMBIOS_GROUP_ASSOCIATIONS {
+    uint8_t Type;                // 14
+    uint8_t Length;              // 5
+    uint16_t Handle;
+    uint8_t GroupName;
+    uint16_t ItemType;
+    uint16_t ItemHandle;
+};
+
+struct SMBIOS_SYSTEM_EVENT_LOG {
+    uint8_t Type;                // 15
+    uint8_t Length;              // 23
+    uint16_t Handle;
+    uint16_t LogAreaLength;
+    uint16_t LogHeaderStartOffset;
+    uint16_t LogDataStartOffset;
+    uint8_t AccessMethod;
+    uint8_t LogStatus;
+    uint32_t LogChangeToken;
+    uint32_t AccessMethodAddress;
+    uint8_t LogHeaderFormat;
+    uint8_t NumberOfSupportedLogTypeDescriptors;
+    uint8_t LengthOfLogTypeDescriptor;
+};
+
 
 struct SYSTEM_THREAD_INFORMATION
 {
