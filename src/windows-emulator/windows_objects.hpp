@@ -23,18 +23,57 @@ struct ATOM_BASIC_INFORMATION
 #pragma pack(pop)
 
 
+enum TIMER_TYPE
+{
+    NotificationTimer = 1,
+    SynchronizationTimer = 2,
+};
+
 struct timer : ref_counted_object
 {
     std::u16string name{};
+    bool signaled = false;
+    TIMER_TYPE type = NotificationTimer;
+    std::chrono::steady_clock::time_point due_time{};
+    uint32_t period = 0;
+
+    bool is_signaled(const std::chrono::steady_clock::time_point& now)
+    {
+        if (this->due_time.time_since_epoch().count() == 0)
+        {
+            return false; // Not set
+        }
+
+        const bool was_signaled = this->signaled || (now >= this->due_time);
+        if (was_signaled && this->type == SynchronizationTimer)
+        {
+            this->signaled = false; // Reset after reading
+            this->due_time = {}; // Clear due time
+        }
+        else if (was_signaled)
+        {
+            this->signaled = true; // NotificationTimer stays signaled
+        }
+
+        return was_signaled;
+    }
 
     void serialize_object(utils::buffer_serializer& buffer) const override
     {
         buffer.write(this->name);
+        buffer.write(this->signaled);
+        buffer.write(this->type);
+        buffer.write(this->due_time);
+        buffer.write(this->period);
     }
 
     void deserialize_object(utils::buffer_deserializer& buffer) override
     {
         buffer.read(this->name);
+        buffer.read(this->signaled);
+        buffer.read(this->type);
+        buffer.read(this->due_time);
+        buffer.read(this->period);
     }
 };
 

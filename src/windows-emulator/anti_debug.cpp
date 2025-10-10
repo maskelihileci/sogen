@@ -861,4 +861,51 @@ namespace anti_debug
        write_memory_with_callback(c, output_buffer, &caps, sizeof(caps));
        return STATUS_SUCCESS;
    }
+
+   // Timer-related anti-debug bypass
+   struct TIMER_SET_INFORMATION
+   {
+       LARGE_INTEGER DueTime;
+       LONG Period;
+       uint64_t CompletionRoutine;
+       uint64_t CompletionContext;
+       BOOLEAN Resume;
+   };
+
+   NTSTATUS handle_NtSetTimerEx(const syscall_context& c, handle timer_handle, uint32_t timer_set_info_class,
+                                 uint64_t timer_set_information, ULONG timer_set_information_length)
+   {
+       (void)timer_set_information_length;
+
+       if (timer_set_info_class != 0) // TimerSetInformationClass
+       {
+           return STATUS_INVALID_PARAMETER;
+       }
+
+       auto* t = c.proc.timers.get(timer_handle);
+       if (!t)
+       {
+           return STATUS_INVALID_HANDLE;
+       }
+
+       emulator_object<TIMER_SET_INFORMATION> set_info(c.emu, timer_set_information);
+       if (!set_info)
+       {
+           return STATUS_INVALID_PARAMETER;
+       }
+
+       const auto info = set_info.read();
+       const auto delay_interval = info.DueTime;
+
+       t->due_time = utils::convert_delay_interval_to_time_point(c.win_emu.clock(), delay_interval);
+       t->signaled = false;
+       t->period = static_cast<uint32_t>(info.Period);
+
+       if (info.CompletionRoutine)
+       {
+           c.win_emu.current_thread().pending_apcs.push_back({0, info.CompletionRoutine, info.CompletionContext, WM_TIMER, 0});
+       }
+
+       return STATUS_SUCCESS;
+   }
 }

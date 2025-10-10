@@ -28,7 +28,7 @@ namespace
         emu.reg(x86_register::rsp, stack_end);
     }
 
-    bool is_object_signaled(process_context& c, const handle h, const uint32_t current_thread_id)
+    bool is_object_signaled(process_context& c, utils::clock& clock, const handle h, const uint32_t current_thread_id)
     {
         const auto type = h.value.type;
 
@@ -58,7 +58,12 @@ namespace
         }
 
         case handle_types::timer: {
-            return true; // TODO
+            auto* t = c.timers.get(h);
+            if (t)
+            {
+                return t->is_signaled(clock.steady_now());
+            }
+            break;
         }
 
         case handle_types::semaphore: {
@@ -172,7 +177,7 @@ bool emulator_thread::is_thread_ready(process_context& process, utils::clock& cl
         {
             const auto& obj = this->await_objects[i];
 
-            const auto signaled = is_object_signaled(process, obj, this->id);
+            const auto signaled = is_object_signaled(process, clock, obj, this->id);
             all_signaled &= signaled;
 
             if (signaled && this->await_any)

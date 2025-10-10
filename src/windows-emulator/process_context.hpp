@@ -58,6 +58,7 @@ struct process_context
 
     process_context(x86_64_emulator& emu, memory_manager& memory, utils::clock& clock, callbacks& cb)
         : callbacks_(&cb),
+          clock_(&clock),
           base_allocator(emu),
           peb(emu),
           process_params(emu),
@@ -81,6 +82,7 @@ struct process_context
 
     generic_handle_store* get_handle_store(handle handle);
 
+    utils::clock* clock_{};
     callbacks* callbacks_{};
 
     uint32_t id{0};

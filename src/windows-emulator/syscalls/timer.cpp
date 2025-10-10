@@ -2,6 +2,7 @@
 #include "../syscall_dispatcher.hpp"
 #include "../emulator_utils.hpp"
 #include "../syscall_utils.hpp"
+#include "../anti_debug.hpp"
 
 namespace syscalls
 {
@@ -87,10 +88,11 @@ namespace syscalls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS handle_NtSetTimerEx(const syscall_context& /*c*/, handle /*timer_handle*/, uint32_t /*timer_set_info_class*/,
-                                 uint64_t /*timer_set_information*/, ULONG /*timer_set_information_length*/)
+
+    NTSTATUS handle_NtSetTimerEx(const syscall_context& c, handle timer_handle, uint32_t timer_set_info_class,
+                                  uint64_t timer_set_information, ULONG timer_set_information_length)
     {
-        return STATUS_NOT_SUPPORTED;
+        return anti_debug::handle_NtSetTimerEx(c, timer_handle, timer_set_info_class, timer_set_information, timer_set_information_length);
     }
 
     NTSTATUS handle_NtCancelTimer()

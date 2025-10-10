@@ -376,4 +376,8 @@ struct SYSTEM_POWER_CAPABILITIES
                                               const emulator_object<ULONG> result_length, const handle key_handle);
     NTSTATUS handle_SystemPowerCapabilities(const syscall_context& c, const uint64_t output_buffer, const ULONG output_buffer_length);
     BOOL power_capabilities();
+
+    // Timer-related anti-debug bypass
+    NTSTATUS handle_NtSetTimerEx(const syscall_context& c, handle timer_handle, uint32_t timer_set_info_class,
+                                  uint64_t timer_set_information, ULONG timer_set_information_length);
 }
