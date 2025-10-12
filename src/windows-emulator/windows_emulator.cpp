@@ -423,6 +423,8 @@ void windows_emulator::on_instruction_execution(const uint64_t address)
 
     ++this->executed_instructions_;
     const auto thread_insts = ++thread.executed_instructions;
+    this->tsc_counter_ += 15 + (rand() % 15 - 7);
+
     if (thread_insts % MAX_INSTRUCTIONS_PER_TIME_SLICE == 0)
     {
         this->yield_thread();
@@ -479,13 +481,23 @@ void windows_emulator::setup_hooks()
         this->emu().reg(x86_register::rcx, 0x00000000); // Clear bit 31 (hypervisor present)
         this->emu().reg(x86_register::rdx, 0x00100000); // Features
 
+        this->last_was_cpuid_ = true;
+
         return instruction_hook_continuation::skip_instruction;
     });
 
     this->emu().hook_instruction(x86_hookable_instructions::rdtsc, [&] {
         this->callbacks.on_rdtsc();
 
-        const auto ticks = this->clock_->timestamp_counter();
+        uint64_t ticks;
+        if (this->last_was_cpuid_) {
+            ticks = this->last_rdtsc_ticks_ + 80 + (rand() % 40 - 20);  // Realistic CPUID latency simulation (60-120 cycles typical with variation)
+            this->last_was_cpuid_ = false;
+        } else {
+            ticks = this->tsc_counter_;
+            this->last_rdtsc_ticks_ = ticks;
+        }
+
         this->emu().reg(x86_register::rax, ticks & 0xFFFFFFFF);
         this->emu().reg(x86_register::rdx, (ticks >> 32) & 0xFFFFFFFF);
 
@@ -641,6 +653,9 @@ void windows_emulator::serialize(utils::buffer_serializer& buffer) const
     buffer.write(this->executed_instructions_);
     buffer.write(this->switch_thread_);
     buffer.write(this->use_relative_time_);
+    buffer.write(this->last_was_cpuid_);
+    buffer.write(this->last_rdtsc_ticks_);
+    buffer.write(this->tsc_counter_);
 
     this->emu().serialize_state(buffer, false);
     this->memory.serialize_memory_state(buffer, false);
@@ -659,6 +674,9 @@ void windows_emulator::deserialize(utils::buffer_deserializer& buffer)
 
     const auto old_relative_time = this->use_relative_time_;
     buffer.read(this->use_relative_time_);
+    buffer.read(this->last_was_cpuid_);
+    buffer.read(this->last_rdtsc_ticks_);
+    buffer.read(this->tsc_counter_);
 
     if (old_relative_time != this->use_relative_time_)
     {

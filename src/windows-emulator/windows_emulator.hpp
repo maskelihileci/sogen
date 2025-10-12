@@ -218,6 +218,10 @@ class windows_emulator
     bool use_relative_time_{false}; // TODO: Get rid of that
     std::atomic_bool should_stop{false};
 
+    bool last_was_cpuid_{false};
+    uint64_t last_rdtsc_ticks_{0};
+    uint64_t tsc_counter_{0};
+
     std::unordered_map<uint16_t, uint16_t> port_mappings_{};
     std::unordered_map<uint64_t, emulator_hook*> write_watch_hooks_{};
 
