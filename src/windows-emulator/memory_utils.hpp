@@ -37,7 +37,7 @@ inline std::optional<nt_memory_permission> try_map_nt_to_emulator_protection(uin
     }
 
     memory_permission common = memory_permission::none;
-    switch (nt_protection)
+    switch (nt_protection & 0xFF)
     {
     case PAGE_NOACCESS:
         common = memory_permission::none;

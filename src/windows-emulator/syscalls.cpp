@@ -137,6 +137,9 @@ namespace syscalls
     NTSTATUS handle_NtReadVirtualMemory(const syscall_context& c, handle process_handle, emulator_pointer base_address,
                                         emulator_pointer buffer, ULONG number_of_bytes_to_read,
                                         emulator_object<ULONG> number_of_bytes_read);
+    NTSTATUS handle_NtWriteVirtualMemory(const syscall_context& c, const handle process_handle, const emulator_pointer base_address,
+                                         const emulator_pointer buffer, const ULONG number_of_bytes_to_write,
+                                         const emulator_object<ULONG> number_of_bytes_written);
     NTSTATUS handle_NtSetInformationVirtualMemory();
     NTSTATUS handle_NtGetWriteWatch(const syscall_context& c, handle process_handle, uint32_t flags, uint64_t base_address,
                                     uint64_t region_size, uint64_t user_addresses_ptr,
@@ -1115,6 +1118,7 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtCreateSemaphore);
     add_handler(NtOpenSemaphore);
     add_handler(NtReadVirtualMemory);
+    add_handler(NtWriteVirtualMemory);
     add_handler(NtQueryInformationToken);
     add_handler(NtDxgkIsFeatureEnabled);
     add_handler(NtAddAtomEx);

@@ -22,7 +22,7 @@ namespace syscalls
             return STATUS_NOT_SUPPORTED;
         }
 
-        if (info_class == MemoryBasicInformation)
+        if (info_class == MemoryBasicInformation || info_class == MemoryPrivilegedBasicInformation)
         {
             if (return_length)
             {
@@ -211,6 +211,7 @@ namespace syscalls
             return STATUS_MEMORY_NOT_ALLOCATED;
         }
 
+        potential_base = page_align_up(potential_base);
         base_address.write(potential_base);
 
         const bool reserve = allocation_type & MEM_RESERVE;
@@ -300,6 +301,32 @@ namespace syscalls
 
         write_memory_with_callback(c, buffer, memory.data(), memory.size());
         number_of_bytes_read.write(number_of_bytes_to_read);
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS handle_NtWriteVirtualMemory(const syscall_context& c, const handle process_handle, const emulator_pointer base_address,
+                                         const emulator_pointer buffer, const ULONG number_of_bytes_to_write,
+                                         const emulator_object<ULONG> number_of_bytes_written)
+    {
+        number_of_bytes_written.write(0);
+
+        if (process_handle != CURRENT_PROCESS &&
+            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+             process_handle.value.id != c.proc.id))
+        {
+            return STATUS_INVALID_HANDLE;
+        }
+
+        std::vector<uint8_t> data{};
+        data.resize(number_of_bytes_to_write);
+
+        if (!c.emu.try_read_memory(buffer, data.data(), data.size()))
+        {
+            return STATUS_INVALID_ADDRESS;
+        }
+
+        write_memory_with_callback(c, base_address, data.data(), data.size());
+        number_of_bytes_written.write(number_of_bytes_to_write);
         return STATUS_SUCCESS;
     }
 

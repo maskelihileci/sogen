@@ -152,6 +152,7 @@ namespace syscalls
             || info_class == ProcessDefaultHardErrorMode                 //
             || info_class == ProcessRaiseUMExceptionOnInvalidHandleClose //
             || info_class == ProcessDynamicFunctionTableInformation      //
+            || info_class == ProcessAffinityMask
             || info_class == ProcessPriorityBoost)
         {
             return STATUS_SUCCESS;
