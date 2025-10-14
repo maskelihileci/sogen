@@ -526,6 +526,7 @@ void windows_emulator::setup_hooks()
                 this->emu().reg(x86_register::eflags, eflags & ~0x100);
             }
 
+            this->current_thread().current_ip = this->emu().read_instruction_pointer();
             this->callbacks.on_suspicious_activity("Singlestep");
             dispatch_single_step(*this);
             return;
