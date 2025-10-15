@@ -18,8 +18,6 @@ namespace syscalls
             return STATUS_INVALID_HANDLE;
         }
 
-        c.win_emu.log.info("NtSetInformationThread called with info_class: %X\n", info_class);
-
         if (info_class == ThreadSchedulerSharedDataSlot || info_class == ThreadBasePriority || info_class == ThreadAffinityMask)
         {
             return STATUS_SUCCESS;
@@ -102,8 +100,6 @@ namespace syscalls
         {
             return STATUS_INVALID_HANDLE;
         }
-
-        c.win_emu.log.info("NtQueryInformationThread called with info_class: %X\n", info_class);
 
         if (info_class == ThreadTebInformation)
         {
@@ -410,8 +406,8 @@ namespace syscalls
                                     const emulator_object<handle> new_thread_handle)
     {
         if ((process_handle != CURRENT_PROCESS &&
-             (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
-              process_handle.value.id != c.proc.id)) ||
+              (process_handle.value.is_pseudo ||
+               process_handle.value.id != c.proc.id)) ||
             thread_handle.value.type != handle_types::thread)
         {
             return STATUS_INVALID_HANDLE;
@@ -520,7 +516,7 @@ namespace syscalls
                                      const emulator_object<PS_ATTRIBUTE_LIST<EmulatorTraits<Emu64>>> attribute_list)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;

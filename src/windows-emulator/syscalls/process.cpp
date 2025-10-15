@@ -12,13 +12,11 @@ namespace syscalls
                                               const emulator_object<uint32_t> return_length)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo  ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
         }
-
-        c.win_emu.log.info("NtQueryInformationProcess called with info_class: %X\n", info_class);
 
         switch (info_class)
         {
@@ -139,7 +137,7 @@ namespace syscalls
                                             const uint64_t process_information, const uint32_t process_information_length)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
@@ -244,7 +242,7 @@ namespace syscalls
                                        const emulator_object<handle> token_handle)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;

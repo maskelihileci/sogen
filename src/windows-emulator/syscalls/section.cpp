@@ -127,7 +127,7 @@ namespace syscalls
                                        const ULONG /*win32_protect*/)
    {
        if (process_handle != CURRENT_PROCESS &&
-           (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+           (process_handle.value.is_pseudo ||
             process_handle.value.id != c.proc.id))
        {
            return STATUS_INVALID_HANDLE;
@@ -259,7 +259,7 @@ namespace syscalls
     NTSTATUS handle_NtUnmapViewOfSection(const syscall_context& c, const handle process_handle, const uint64_t base_address)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;

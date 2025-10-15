@@ -11,7 +11,7 @@ namespace syscalls
                                          const uint64_t memory_information_length, const emulator_object<uint64_t> return_length)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
@@ -131,7 +131,7 @@ namespace syscalls
                                            const uint32_t protection, const emulator_object<uint32_t> old_protection)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
@@ -178,7 +178,7 @@ namespace syscalls
                                               const uint32_t page_protection)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
@@ -249,7 +249,7 @@ namespace syscalls
                                         const emulator_object<uint64_t> bytes_to_allocate, const uint32_t free_type)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
@@ -285,7 +285,7 @@ namespace syscalls
         number_of_bytes_read.write(0);
 
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
@@ -311,7 +311,7 @@ namespace syscalls
         number_of_bytes_written.write(0);
 
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
@@ -341,7 +341,7 @@ namespace syscalls
                                       emulator_object<uint32_t> granularity)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
@@ -392,7 +392,7 @@ namespace syscalls
                                         uint64_t /*region_size*/)
     {
         if (process_handle != CURRENT_PROCESS &&
-            (process_handle.value.is_pseudo || process_handle.value.type != handle_types::process ||
+            (process_handle.value.is_pseudo ||
              process_handle.value.id != c.proc.id))
         {
             return STATUS_INVALID_HANDLE;
