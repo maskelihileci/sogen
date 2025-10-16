@@ -713,6 +713,15 @@ namespace syscalls
         return 96;
     }
 
+    hwnd handle_NtUserGetForegroundWindow(const syscall_context& c)
+    {
+        const auto& windows = c.proc.windows;
+        if (windows.size() == 0) {
+            return 0;
+        }
+        return windows.begin()->first;
+    }
+
     hdc handle_NtUserGetDCEx(const syscall_context& /*c*/, const hwnd window, const uint64_t /*clip_region*/, const ULONG /*flags*/)
     {
         return window;
@@ -1259,6 +1268,7 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtQueryInformationAtom);
     add_handler(NtUserSetTimer);
     add_handler(NtUserKillTimer);
+    add_handler(NtUserGetForegroundWindow);
 
 #undef add_handler
 }

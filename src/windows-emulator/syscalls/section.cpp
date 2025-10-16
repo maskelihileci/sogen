@@ -99,7 +99,6 @@ namespace syscalls
         if (attributes.RootDirectory != KNOWN_DLLS_DIRECTORY && attributes.RootDirectory != BASE_NAMED_OBJECTS_DIRECTORY)
         {
             c.win_emu.log.error("Unsupported section\n");
-            c.emu.stop();
             return STATUS_NOT_SUPPORTED;
         }
 
