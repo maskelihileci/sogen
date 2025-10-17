@@ -378,6 +378,15 @@ class handle_store : public generic_handle_store
         return this->store_.end();
     }
 
+    handle get_first_handle()
+    {
+        if (this->store_.empty())
+        {
+            return {};
+        }
+        return this->make_handle(this->store_.begin()->first);
+    }
+
   private:
     typename value_map::iterator get_iterator(const handle_value h)
     {

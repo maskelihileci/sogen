@@ -154,7 +154,7 @@ namespace syscalls
             if (required_size > object_information_length)
             {
                 return_length.write_if_valid(static_cast<ULONG>(required_size));
-                return STATUS_BUFFER_TOO_SMALL;
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
             emulator_allocator allocator(c.emu, object_information, object_information_length);
@@ -171,7 +171,7 @@ namespace syscalls
             if (required_size > object_information_length)
             {
                 return_length.write_if_valid(static_cast<ULONG>(required_size));
-                return STATUS_BUFFER_TOO_SMALL;
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
             emulator_allocator allocator(c.emu, object_information, object_information_length);

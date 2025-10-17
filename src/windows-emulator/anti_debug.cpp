@@ -34,14 +34,109 @@ namespace anti_debug
     }
 
     NTSTATUS handle_ProcessDebugObjectHandle(const syscall_context& c, const uint64_t process_information,
-                                             const uint32_t process_information_length,
-                                             const emulator_object<uint32_t> return_length)
+                                            const uint32_t process_information_length,
+                                            const emulator_object<uint32_t> return_length)
     {
-        return handle_query<handle>(c, process_information, process_information_length, return_length,
-                                    [](handle& h) {
-                                        h = NULL_HANDLE;
-                                        return STATUS_PORT_NOT_SET;
-                                    });
+        // Required size for the handle
+        constexpr uint32_t required_size = sizeof(handle);
+        char dummy;
+        
+        // Condition 1: NULL buffer check (STATUS_ACCESS_VIOLATION)
+        // If buffer is NULL but length is not 0, return access violation immediately
+        if (process_information == 0 && process_information_length != 0)
+        {
+            // Do NOT write return_length here - immediate error
+            return STATUS_ACCESS_VIOLATION; // 0xC0000005
+        }
+        
+        // Condition 2a: Check for alignment BEFORE size check (important!)
+        // If buffer is not aligned to pointer size, return misalignment
+        if (process_information != 0 && process_information % sizeof(void*) != 0)
+        {
+            // Do NOT write return_length here - alignment error takes precedence
+            return STATUS_DATATYPE_MISALIGNMENT; // 0x80000002
+        }
+        
+        // Condition 2b: Wrong buffer size check (STATUS_INFO_LENGTH_MISMATCH)
+        // Check buffer size mismatch
+        if (process_information_length < required_size)
+        {
+            // Write return_length ONLY for INFO_LENGTH_MISMATCH and if address is valid
+            if (return_length)
+            {
+                if (c.win_emu.memory.try_read_memory(return_length.value(), &dummy, 1))
+                {
+                    return_length.write(required_size);
+                }
+                else
+                {
+                    return STATUS_ACCESS_VIOLATION;
+                }
+            }
+            return STATUS_INFO_LENGTH_MISMATCH; // 0xC0000004
+        }
+        
+        // Condition 3: Valid call - check if process is being debugged
+        const auto debug_obj_handle = c.proc.debug_objects.get_first_handle();
+        
+        // Check for overlapping buffers (anti-anti-debug detection)
+        // If return_length points to the same location as process_information,
+        // we need to write return_length FIRST, then check if we should overwrite with handle
+        const bool overlapping_buffers = (return_length && return_length.value() == process_information);
+        
+        if (overlapping_buffers)
+        {
+            // CRITICAL: Write return_length FIRST for overlapping buffer case
+            if (c.win_emu.memory.try_read_memory(return_length.value(), &dummy, 1))
+            {
+                return_length.write(required_size);
+            }
+            else
+            {
+                return STATUS_ACCESS_VIOLATION;
+            }
+            
+            // Now check if we're being debugged
+            if (debug_obj_handle.bits != NULL_HANDLE.bits)
+            {
+                // Being debugged: overwrite with the debug object handle
+                const emulator_object<handle> debug_handle{c.emu, process_information};
+                debug_handle.write(debug_obj_handle);
+                return STATUS_SUCCESS; // 0x00000000
+            }
+            else
+            {
+                // NOT being debugged: leave the return_length value (don't overwrite)
+                // The buffer now contains required_size, which is correct behavior
+                return STATUS_PORT_NOT_SET; // 0xC0000353
+            }
+        }
+        else
+        {
+            // Normal case: non-overlapping buffers
+            // Write return_length first (if valid address)
+            // CRITICAL: Write return_length FIRST for overlapping buffer case
+            if (c.win_emu.memory.try_read_memory(return_length.value(), &dummy, 1))
+            {
+                return_length.write(required_size);
+            }
+            
+            // Then write the handle value
+            const emulator_object<handle> debug_handle{c.emu, process_information};
+            
+            if (debug_obj_handle.bits != NULL_HANDLE.bits)
+            {
+                // Process IS being debugged, return the debug object handle
+                debug_handle.write(debug_obj_handle);
+                return STATUS_SUCCESS; // 0x00000000
+            }
+            else
+            {
+                // Process is NOT being debugged, return NULL handle
+                debug_handle.write(NULL_HANDLE);
+                return STATUS_PORT_NOT_SET; // 0xC0000353
+            }
+        }
     }
 
     NTSTATUS handle_ProcessDebugFlags(const syscall_context& c, const uint64_t process_information,
