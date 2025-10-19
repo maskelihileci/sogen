@@ -219,6 +219,24 @@ namespace syscalls
             return STATUS_SUCCESS;
         }
 
+        if (info_class == ThreadDynamicCodePolicyInfo)
+        {
+            if (return_length)
+            {
+                return_length.write(sizeof(ULONG));
+            }
+
+            if (thread_information_length < sizeof(ULONG))
+            {
+                return STATUS_BUFFER_OVERFLOW;
+            }
+
+            const emulator_object<ULONG> info{c.emu, thread_information};
+            info.write(0); // Default: no policy restrictions
+
+            return STATUS_SUCCESS;
+        }
+
         c.win_emu.log.error("Unsupported thread query info class: %X\n", info_class);
         c.emu.stop();
 

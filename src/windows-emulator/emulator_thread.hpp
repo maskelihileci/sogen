@@ -3,6 +3,7 @@
 #include "handles.hpp"
 #include "emulator_utils.hpp"
 #include "memory_manager.hpp"
+#include "cpu_context.hpp"
 
 #include <utils/moved_marker.hpp>
 
@@ -116,14 +117,54 @@ class emulator_thread : public ref_counted_object
 
     void restore(x86_64_emulator& emu) const
     {
-        emu.restore_registers(this->last_registers);
+        if (!this->last_registers.empty())
+        {
+            // Minidump thread'ları için özel kontrol - CONTEXT64 boyutu kontrolü
+            if (this->last_registers.size() == sizeof(CONTEXT64))
+            {
+                // Minidump formatında, doğrudan CONTEXT64 kullan
+                const CONTEXT64* context = reinterpret_cast<const CONTEXT64*>(this->last_registers.data());
+                cpu_context::restore(emu, *context);
+            }
+            else
+            {
+                // Normal thread'lar için serialized format kullan
+                emu.restore_registers(this->last_registers);
+            }
+        }
     }
 
     void setup_if_necessary(x86_64_emulator& emu, const process_context& context)
     {
+        // For minidump threads, skip full setup since context is already loaded
+        if (!this->last_registers.empty() && this->last_registers.size() == sizeof(CONTEXT64))
+        {
+            // Minidump thread - just ensure GS base is set
+            if (this->teb && this->teb->value() != 0)
+            {
+                emu.set_segment_base(x86_register::gs_base, this->teb->value());
+            }
+
+            if (this->pending_status.has_value())
+            {
+                const auto status = *this->pending_status;
+                this->pending_status = {};
+
+                emu.reg<uint64_t>(x86_register::rax, static_cast<uint64_t>(status));
+            }
+            return;
+        }
+
+
         if (!this->executed_instructions)
         {
             this->setup_registers(emu, context);
+        }
+
+
+        if (this->teb && this->teb->value() != 0)
+        {
+            emu.set_segment_base(x86_register::gs_base, this->teb->value());
         }
 
         if (this->pending_status.has_value())

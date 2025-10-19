@@ -393,6 +393,11 @@ namespace syscalls
     {
         return STATUS_SUCCESS;
     }
+    NTSTATUS handle_NtWaitForWorkViaWorkerFactory(const syscall_context& c, handle /*worker_factory_handle*/, emulator_pointer /*timeout*/)
+    {
+        c.win_emu.yield_thread(true);
+        return STATUS_SUCCESS;
+    }
 
     NTSTATUS handle_NtCreateIoCompletion(const syscall_context& c, const emulator_object<handle> event_handle,
                                          const ACCESS_MASK desired_access,
@@ -1097,6 +1102,7 @@ void syscall_dispatcher::add_handlers(std::map<std::string, syscall_handler>& ha
     add_handler(NtCreateWorkerFactory);
     add_handler(NtSetInformationWorkerFactory);
     add_handler(NtShutdownWorkerFactory);
+    add_handler(NtWaitForWorkViaWorkerFactory);
     add_handler(NtManageHotPatch);
     add_handler(NtOpenSection);
     add_handler(NtMapViewOfSection);

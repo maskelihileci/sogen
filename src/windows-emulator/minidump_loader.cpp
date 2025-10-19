@@ -839,16 +839,19 @@ namespace minidump_loader
             const auto* ntdll = win_emu.mod_manager.ntdll;
             const auto* win32u = win_emu.mod_manager.win32u;
 
-            if (ntdll && win32u)
+            if (ntdll)
             {
                 const auto ntdll_data = win_emu.emu().read_memory(ntdll->image_base, static_cast<size_t>(ntdll->size_of_image));
-                const auto win32u_data = win_emu.emu().read_memory(win32u->image_base, static_cast<size_t>(win32u->size_of_image));
-                win_emu.dispatcher.setup(ntdll->exports, ntdll_data, win32u->exports, win32u_data);
+
+                const exported_symbols& win32u_exports = win32u ? win32u->exports : exported_symbols{};
+                std::span<const std::byte> win32u_data = win32u ? win_emu.emu().read_memory(win32u->image_base, static_cast<size_t>(win32u->size_of_image)) : std::span<const std::byte>{};
+
+                win_emu.dispatcher.setup(ntdll->exports, ntdll_data, win32u_exports, win32u_data);
                 win_emu.log.info("Syscall dispatcher setup complete.\n");
             }
             else
             {
-                win_emu.log.error("ntdll or win32u module not found, syscall dispatcher cannot be set up.\n");
+                win_emu.log.error("ntdll module not found, syscall dispatcher cannot be set up.\n");
             }
 
             // 5. Reconstruct the rest of the process state

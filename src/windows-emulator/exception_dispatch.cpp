@@ -181,12 +181,15 @@ void dispatch_access_violation(windows_emulator& win_emu, const uint64_t address
 
 void dispatch_guard_page_violation(windows_emulator& win_emu, const uint64_t address, const memory_operation operation)
 {
-    win_emu.current_thread().current_ip = address;
+    if (operation == memory_operation::exec)
+    {
+        win_emu.current_thread().current_ip = address;
+    }
     dispatch_exception(win_emu, STATUS_GUARD_PAGE_VIOLATION,
-                       {
-                           map_violation_operation_to_parameter(operation),
-                           address,
-                       });
+                        {
+                            map_violation_operation_to_parameter(operation),
+                            address,
+                        });
 }
 
 void dispatch_illegal_instruction_violation(windows_emulator& win_emu)
