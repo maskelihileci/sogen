@@ -445,3 +445,17 @@ constexpr auto CURRENT_THREAD = make_handle(~1ULL);
 constexpr auto CURRENT_PROCESS_TOKEN = make_handle(~3ULL);
 constexpr auto CURRENT_THREAD_TOKEN = make_handle(~4ULL);
 constexpr auto CURRENT_THREAD_EFFECTIVE_TOKEN = make_handle(~5ULL);
+
+// Minidump handle resolution helper
+// Resolves raw minidump handles to emulator-encoded handles
+// Returns the original handle if no mapping exists (normal process case)
+inline handle resolve_minidump_handle(const handle& h, const std::map<uint64_t, handle>& mapping)
+{
+    if (mapping.empty())
+    {
+        return h;  // Fast path: normal process, no mapping needed
+    }
+    
+    const auto it = mapping.find(h.bits);
+    return (it != mapping.end()) ? it->second : h;
+}

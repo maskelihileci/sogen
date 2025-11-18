@@ -9,6 +9,7 @@
 #include "cpu_context.hpp"
 #include <minidump/minidump.hpp>
 #include "anti_debug.hpp"
+#include "io_device.hpp"
 
 namespace minidump_loader
 {
@@ -554,6 +555,7 @@ namespace minidump_loader
                 thread.id = thread_info.thread_id;
                 thread.stack_base = thread_info.stack_start_of_memory_range;
                 thread.stack_size = thread_info.stack_data_size;
+                thread.suspended = thread_info.suspend_count;
 
                 // Set TEB address if valid
                 if (thread_info.teb != 0)
@@ -718,6 +720,30 @@ namespace minidump_loader
 
             win_emu.process.peb.set_address(peb_address);
             win_emu.log.info("PEB address: 0x%" PRIx64 " (from TEB 0x%" PRIx64 ")\n", peb_address, first_thread.teb);
+
+            // PEB'deki BeingDebugged bayrağını kontrol et ve sıfırla (anti-debug)
+            try
+            {
+                constexpr uint64_t peb_being_debugged_offset = offsetof(PEB64, BeingDebugged);
+                uint8_t being_debugged = 0;
+                win_emu.memory.read_memory(peb_address + peb_being_debugged_offset, &being_debugged, sizeof(being_debugged));
+
+                if (being_debugged != 0)
+                {
+                    win_emu.log.info("PEB BeingDebugged flag detected (0x%02X), clearing for anti-debug bypass\n", being_debugged);
+                    being_debugged = 0;
+                    win_emu.memory.write_memory(peb_address + peb_being_debugged_offset, &being_debugged, sizeof(being_debugged));
+                    win_emu.log.info("PEB BeingDebugged flag cleared successfully\n");
+                }
+                else
+                {
+                    win_emu.log.info("PEB BeingDebugged flag is already cleared\n");
+                }
+            }
+            catch (const std::exception& e)
+            {
+                win_emu.log.warn("Failed to access PEB BeingDebugged flag: %s\n", e.what());
+            }
         }
         catch (const std::exception& e)
         {
@@ -742,30 +768,149 @@ namespace minidump_loader
         {
             handle_type_counts[handle_info.type_name]++;
 
+            // Debug: Log all handle IDs
+            if (handle_info.object_name.find("\\Device\\ConDrv") == 0)
+            {
+                win_emu.log.info("  Minidump ConDrv handle: ID=0x%" PRIx64 ", name='%s'\n",
+                                handle_info.handle, handle_info.object_name.c_str());
+            }
+
+            handle created_handle{};
+
             try
             {
                 if (handle_info.type_name == "Event")
                 {
                     event evt{};
                     evt.name = u8_to_u16(handle_info.object_name);
-                    win_emu.process.events.store(std::move(evt));
+
+                    // Check for EmuHandleStream data to set initial signaled state
+                    const auto& emu_handles = dump_file->emu_handle_entries();
+                    for (const auto& emu_handle : emu_handles)
+                    {
+                        if (emu_handle.handle_value == handle_info.handle &&
+                            emu_handle.emu_type == minidump::emu_handle_type::event)
+                        {
+                            // Found matching EmuHandle entry
+                            if ((emu_handle.flags & minidump::EMU_HANDLE_FLAG_HAS_STATE_INFO) != 0 &&
+                                emu_handle.detail_rva != 0 && emu_handle.detail_size > 0)
+                            {
+                                try
+                                {
+                                    const minidump::emu_event_info_v1* event_info =
+                                        reinterpret_cast<const minidump::emu_event_info_v1*>(
+                                            dump_file->emu_handle_detail_data().data() + emu_handle.detail_rva);
+
+                                    if (event_info->signaled != 0xFF) // Not unknown
+                                    {
+                                        evt.signaled = (event_info->signaled == 1);
+                                        evt.type = (event_info->manual_reset == 1) ?
+                                            SynchronizationEvent : NotificationEvent;
+                                        win_emu.log.info("  Set initial signaled state for Event handle 0x%" PRIx64 ": signaled=%s, type=%s\n",
+                                                        handle_info.handle, evt.signaled ? "true" : "false",
+                                                        evt.type == SynchronizationEvent ? "SynchronizationEvent" : "NotificationEvent");
+                                    }
+                                }
+                                catch (const std::exception& e)
+                                {
+                                    win_emu.log.warn("  Failed to read EmuHandle event info for handle 0x%" PRIx64 ": %s\n",
+                                                    handle_info.handle, e.what());
+                                }
+                            }
+                            break; // Found the matching handle
+                        }
+                    }
+
+                    created_handle = win_emu.process.events.store(std::move(evt));
                     created_count++;
                 }
                 else if (handle_info.type_name == "File")
                 {
-                    file f{};
-                    f.name = u8_to_u16(handle_info.object_name);
-                    win_emu.process.files.store(std::move(f));
-                    created_count++;
+                    // Check if this is a device file (like \Device\ConDrv)
+                    const std::u16string obj_name = u8_to_u16(handle_info.object_name);
+                    const auto device_prefix = std::u16string_view(u"\\Device\\");
+                    if (obj_name.starts_with(device_prefix))
+                    {
+                        // Special handling for ConDrv console handles
+                        if (obj_name == u"\\Device\\ConDrv")
+                        {
+                            // Map ConDrv handles by their raw handle ID to standard console handles
+                            // Raw handle 0x48 -> CONSOLE_HANDLE, 0x50 -> STDIN_HANDLE, 0x58 -> STDOUT_HANDLE
+                            handle mapped_handle{};
+                            if (handle_info.handle == 0x48)
+                            {
+                                mapped_handle = CONSOLE_HANDLE;
+                            }
+                            else if (handle_info.handle == 0x54)
+                            {
+                                mapped_handle = STDIN_HANDLE;
+                            }
+                            else if (handle_info.handle == 0x58)
+                            {
+                                mapped_handle = STDOUT_HANDLE;
+                            }
+                            else
+                            {
+                                // Create device for other ConDrv handles
+                                io_device_creation_data data{};
+                                io_device_container container{u"ConDrv", win_emu, data};
+                                if (!container)
+                                {
+                                    win_emu.log.error("  Failed to create ConDrv device for %s\n", handle_info.object_name.c_str());
+                                    continue;
+                                }
+                                created_handle = win_emu.process.devices.store(std::move(container));
+                                created_count++;
+                            }
+
+                            if (mapped_handle.bits != 0)
+                            {
+                                // Use the pre-defined pseudo handle instead of creating a new one
+                                win_emu.process.minidump_handle_mapping[handle_info.handle] = mapped_handle;
+                                win_emu.log.info("  Mapped ConDrv handle 0x%" PRIx64 " -> standard console handle 0x%" PRIx64 "\n",
+                                                handle_info.handle, mapped_handle.bits);
+                                continue; // Skip the normal mapping below
+                            }
+                        }
+                        else
+                        {
+                            // Create device for other device types
+                            const auto device_name = obj_name.substr(device_prefix.size());
+                            io_device_creation_data data{};
+                            io_device_container container{std::u16string(device_name), win_emu, data};
+                            if (!container)
+                            {
+                                win_emu.log.error("  Failed to create device for %s\n", handle_info.object_name.c_str());
+                                continue;
+                            }
+                            created_handle = win_emu.process.devices.store(std::move(container));
+                            created_count++;
+                        }
+                    }
+                    else
+                    {
+                        file f{};
+                        f.name = obj_name;
+                        created_handle = win_emu.process.files.store(std::move(f));
+                        created_count++;
+                    }
                 }
                 else if (handle_info.type_name == "Mutant")
                 {
                     mutant m{};
                     m.name = u8_to_u16(handle_info.object_name);
-                    win_emu.process.mutants.store(std::move(m));
+                    created_handle = win_emu.process.mutants.store(std::move(m));
                     created_count++;
                 }
                 // Other handle types can be added here as needed
+
+                // Map the minidump raw handle to the emulator encoded handle
+                if (created_handle.bits != 0)
+                {
+                    win_emu.process.minidump_handle_mapping[handle_info.handle] = created_handle;
+                    win_emu.log.info("  Mapped minidump handle 0x%" PRIx64 " -> emulator handle 0x%" PRIx64 "\n",
+                                    handle_info.handle, created_handle.bits);
+                }
             }
             catch (const std::exception& e)
             {
@@ -842,11 +987,10 @@ namespace minidump_loader
             if (ntdll)
             {
                 const auto ntdll_data = win_emu.emu().read_memory(ntdll->image_base, static_cast<size_t>(ntdll->size_of_image));
+                const auto win32u_data = win_emu.emu().read_memory(win32u->image_base, static_cast<size_t>(win32u->size_of_image));
 
-                const exported_symbols& win32u_exports = win32u ? win32u->exports : exported_symbols{};
-                std::span<const std::byte> win32u_data = win32u ? win_emu.emu().read_memory(win32u->image_base, static_cast<size_t>(win32u->size_of_image)) : std::span<const std::byte>{};
 
-                win_emu.dispatcher.setup(ntdll->exports, ntdll_data, win32u_exports, win32u_data);
+                win_emu.dispatcher.setup(ntdll->exports, ntdll_data, win32u->exports, win32u_data);
                 win_emu.log.info("Syscall dispatcher setup complete.\n");
             }
             else

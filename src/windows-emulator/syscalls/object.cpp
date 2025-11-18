@@ -265,7 +265,19 @@ namespace syscalls
 
         for (ULONG i = 0; i < count; ++i)
         {
-            const auto h = handles.read(i);
+            // Resolve raw handle from minidump mapping if applicable
+            const auto raw_h = handles.read(i);
+            const auto h = resolve_minidump_handle(raw_h, c.proc.minidump_handle_mapping);
+
+            // Check if the object is already signaled (Source File #11)
+            if (wait_type == WaitAny && h.value.type == handle_types::event)
+            {
+                const auto* evt = c.proc.events.get(h);
+                if (evt && evt->signaled)
+                {
+                    return STATUS_WAIT_0 + i; // Object is already signaled, return immediately
+                }
+            }
 
             if (!is_awaitable_object_type(h))
             {
@@ -275,7 +287,6 @@ namespace syscalls
 
             t.await_objects.push_back(h);
         }
-
         if (timeout.value() && !t.await_time.has_value())
         {
             t.await_time = utils::convert_delay_interval_to_time_point(c.win_emu.clock(), timeout.read());
@@ -285,24 +296,36 @@ namespace syscalls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS handle_NtWaitForSingleObject(const syscall_context& c, const handle h, const BOOLEAN alertable,
-                                          const emulator_object<LARGE_INTEGER> timeout)
+    NTSTATUS handle_NtWaitForSingleObject(const syscall_context& c, const handle raw_h, const BOOLEAN alertable,
+                                           const emulator_object<LARGE_INTEGER> timeout)
     {
+        const auto h = resolve_minidump_handle(raw_h, c.proc.minidump_handle_mapping);
+
         if (!is_awaitable_object_type(h))
         {
             c.win_emu.log.warn("Unsupported handle type for NtWaitForSingleObject: %d!\n", h.value.type);
             return STATUS_NOT_SUPPORTED;
         }
-
+    
+        // Check if the object is already signaled
+        if (h.value.type == handle_types::event)
+        {
+            const auto* evt = c.proc.events.get(h);
+            if (evt && evt->signaled)
+            {
+                return STATUS_SUCCESS; // Object is already signaled, return immediately
+            }
+        }
+    
         auto& t = c.win_emu.current_thread();
         t.await_objects = {h};
         t.await_any = false;
-
+    
         if (timeout.value() && !t.await_time.has_value())
         {
             t.await_time = utils::convert_delay_interval_to_time_point(c.win_emu.clock(), timeout.read());
         }
-
+        
         c.win_emu.yield_thread(alertable);
         return STATUS_SUCCESS;
     }

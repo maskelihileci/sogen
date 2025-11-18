@@ -53,10 +53,11 @@ namespace syscalls
                                          const emulator_object<IO_STATUS_BLOCK<EmulatorTraits<Emu64>>> io_status_block,
                                          const uint64_t file_information, const ULONG length, const FILE_INFORMATION_CLASS info_class)
     {
-        const auto* f = c.proc.files.get(file_handle);
+        const handle actual_handle = resolve_minidump_handle(file_handle, c.proc.minidump_handle_mapping);
+        const auto* f = c.proc.files.get(actual_handle);
         if (!f)
         {
-            if (c.proc.devices.get(file_handle))
+            if (c.proc.devices.get(actual_handle))
             {
                 c.win_emu.log.error("Unsupported set device info class: %X\n", info_class);
                 return STATUS_SUCCESS;
@@ -139,6 +140,7 @@ namespace syscalls
                                                  const uint64_t fs_information, const ULONG length,
                                                  const FS_INFORMATION_CLASS fs_information_class)
     {
+        const handle actual_handle = resolve_minidump_handle(file_handle, c.proc.minidump_handle_mapping);
         switch (fs_information_class)
         {
         case FileFsDeviceInformation:
@@ -147,7 +149,7 @@ namespace syscalls
                                                                 info.DeviceType = FILE_DEVICE_DISK;
                                                                 info.Characteristics = 0x20020;
 
-                                                                if (const auto* device = c.proc.devices.get(file_handle))
+                                                                if (const auto* device = c.proc.devices.get(actual_handle))
                                                                 {
                                                                     if (dynamic_cast<console_driver*>(
                                                                             device->get_internal_device()))
@@ -326,7 +328,8 @@ namespace syscalls
                                            const uint64_t file_information, const uint32_t length, const uint32_t info_class,
                                            const ULONG query_flags, const emulator_object<UNICODE_STRING<EmulatorTraits<Emu64>>> file_name)
     {
-        auto* f = c.proc.files.get(file_handle);
+        const handle actual_handle = resolve_minidump_handle(file_handle, c.proc.minidump_handle_mapping);
+        auto* f = c.proc.files.get(actual_handle);
         if (!f || !f->is_directory())
         {
             return STATUS_INVALID_HANDLE;
@@ -381,6 +384,8 @@ namespace syscalls
                                            const emulator_object<IO_STATUS_BLOCK<EmulatorTraits<Emu64>>> io_status_block,
                                            const uint64_t file_information, const uint32_t length, const uint32_t info_class)
     {
+        const handle actual_handle = resolve_minidump_handle(file_handle, c.proc.minidump_handle_mapping);
+        
         IO_STATUS_BLOCK<EmulatorTraits<Emu64>> block{};
         block.Status = STATUS_SUCCESS;
         block.Information = 0;
@@ -397,7 +402,7 @@ namespace syscalls
             return status;
         };
 
-        const auto* f = c.proc.files.get(file_handle);
+        const auto* f = c.proc.files.get(actual_handle);
         if (!f)
         {
             return ret(STATUS_INVALID_HANDLE);
@@ -622,10 +627,12 @@ namespace syscalls
                                const ULONG length, const emulator_object<LARGE_INTEGER> /*byte_offset*/,
                                const emulator_object<ULONG> /*key*/)
     {
+        const handle actual_handle = resolve_minidump_handle(file_handle, c.proc.minidump_handle_mapping);
+
         std::string temp_buffer{};
         temp_buffer.resize(length);
 
-        if (file_handle == STDIN_HANDLE)
+        if (actual_handle == STDIN_HANDLE)
         {
             char chr{};
             if (std::cin.readsome(&chr, 1) <= 0)
@@ -642,7 +649,7 @@ namespace syscalls
             return STATUS_SUCCESS;
         }
 
-        const auto* container = c.proc.devices.get(file_handle);
+        const auto* container = c.proc.devices.get(actual_handle);
         if (container)
         {
             if (auto* pipe = container->get_internal_device<named_pipe>())
@@ -670,7 +677,7 @@ namespace syscalls
             }
         }
 
-        const auto* f = c.proc.files.get(file_handle);
+        const auto* f = c.proc.files.get(actual_handle);
         if (!f)
         {
             return STATUS_INVALID_HANDLE;
@@ -688,11 +695,13 @@ namespace syscalls
                                 const ULONG length, const emulator_object<LARGE_INTEGER> /*byte_offset*/,
                                 const emulator_object<ULONG> /*key*/)
     {
+        const handle actual_handle = resolve_minidump_handle(file_handle, c.proc.minidump_handle_mapping);
+
         std::string temp_buffer{};
         temp_buffer.resize(length);
         c.emu.read_memory(buffer, temp_buffer.data(), temp_buffer.size());
 
-        if (file_handle == STDOUT_HANDLE)
+        if (actual_handle == STDOUT_HANDLE)
         {
             if (io_status_block)
             {
@@ -706,9 +715,9 @@ namespace syscalls
             return STATUS_SUCCESS;
         }
 
-        if (file_handle.value.type == handle_types::device)
+        if (actual_handle.value.type == handle_types::device)
         {
-            const auto* d = c.proc.devices.get(file_handle);
+            const auto* d = c.proc.devices.get(actual_handle);
             if (d && dynamic_cast<console_driver*>(d->get_internal_device()))
             {
                 c.win_emu.callbacks.on_stdout(temp_buffer);
@@ -723,7 +732,7 @@ namespace syscalls
             }
         }
 
-        const auto* container = c.proc.devices.get(file_handle);
+        const auto* container = c.proc.devices.get(actual_handle);
         if (container)
         {
             if (auto* pipe = container->get_internal_device<named_pipe>())
@@ -744,7 +753,7 @@ namespace syscalls
             }
         }
 
-        const auto* f = c.proc.files.get(file_handle);
+        const auto* f = c.proc.files.get(actual_handle);
         if (!f)
         {
             return STATUS_INVALID_HANDLE;
@@ -1366,12 +1375,14 @@ namespace syscalls
     NTSTATUS handle_NtFlushBuffersFile(const syscall_context& c, const handle file_handle,
                                        const emulator_object<IO_STATUS_BLOCK<EmulatorTraits<Emu64>>> /*io_status_block*/)
     {
-        if (file_handle == STDOUT_HANDLE)
+        const handle actual_handle = resolve_minidump_handle(file_handle, c.proc.minidump_handle_mapping);
+        
+        if (actual_handle == STDOUT_HANDLE)
         {
             return STATUS_SUCCESS;
         }
 
-        const auto* f = c.proc.files.get(file_handle);
+        const auto* f = c.proc.files.get(actual_handle);
         if (!f)
         {
             return STATUS_INVALID_HANDLE;

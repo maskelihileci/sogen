@@ -474,17 +474,7 @@ void windows_emulator::setup_hooks()
         return instruction_hook_continuation::skip_instruction;
     });
 
-    this->emu().hook_instruction(x86_hookable_instructions::cpuid, [&] {
-        // Assume leaf 1 for anti-debug bypass
-        this->emu().reg(x86_register::rax, 0x000106E5); // CPU family/model
-        this->emu().reg(x86_register::rbx, 0x00000000);
-        this->emu().reg(x86_register::rcx, 0x00000000); // Clear bit 31 (hypervisor present)
-        this->emu().reg(x86_register::rdx, 0x00100000); // Features
 
-        this->last_was_cpuid_ = true;
-
-        return instruction_hook_continuation::skip_instruction;
-    });
 
     this->emu().hook_instruction(x86_hookable_instructions::rdtsc, [&] {
         this->callbacks.on_rdtsc();

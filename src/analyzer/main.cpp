@@ -490,7 +490,14 @@ namespace
                                    (*mod) ? (*mod)->name.c_str() : "<N/A>");
             }
 
-            return instruction_hook_continuation::run_instruction;
+            win_emu->emu().reg(x86_register::rax, 0x000106E5); // CPU family/model
+            win_emu->emu().reg(x86_register::rbx, 0x00000000);
+            win_emu->emu().reg(x86_register::rcx, 0x50B80201); // Clear bit 31 (hypervisor present)
+            win_emu->emu().reg(x86_register::rdx, 0xBFEBFBFF); // Features
+
+            win_emu->last_was_cpuid_ = true;
+
+        return instruction_hook_continuation::skip_instruction;
         });
 
         if (options.log_foreign_module_access)

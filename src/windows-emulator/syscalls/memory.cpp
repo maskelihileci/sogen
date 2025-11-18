@@ -271,8 +271,11 @@ namespace syscalls
 
         if (free_type & MEM_DECOMMIT)
         {
-            return c.win_emu.memory.decommit_memory(allocation_base, static_cast<size_t>(allocation_size)) ? STATUS_SUCCESS
-                                                                                                           : STATUS_MEMORY_NOT_ALLOCATED;
+            const auto aligned_base = page_align_down(allocation_base);
+            const auto aligned_size = page_align_up(allocation_base + allocation_size) - aligned_base;
+            
+            return c.win_emu.memory.decommit_memory(aligned_base, static_cast<size_t>(aligned_size)) ? STATUS_SUCCESS
+                                                                                                      : STATUS_MEMORY_NOT_ALLOCATED;
         }
 
         throw std::runtime_error("Bad free type");

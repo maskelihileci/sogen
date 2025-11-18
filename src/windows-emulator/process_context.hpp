@@ -127,4 +127,6 @@ struct process_context
     uint32_t spawned_thread_count{0};
     handle_store<handle_types::thread, emulator_thread> threads{};
     emulator_thread* active_thread{nullptr};
+
+    std::map<uint64_t, handle> minidump_handle_mapping{};
 };
