@@ -902,8 +902,44 @@ namespace minidump_loader
                     created_handle = win_emu.process.mutants.store(std::move(m));
                     created_count++;
                 }
-                // Other handle types can be added here as needed
+                else if (handle_info.type_name == "Directory")
+                {
+                    const std::u16string name = u8_to_u16(handle_info.object_name);
+                    
+                    if (name == u"\\KnownDlls")
+                    {
+                        created_handle = KNOWN_DLLS_DIRECTORY;
+                        win_emu.log.info("  Identified KnownDlls directory handle: 0x%" PRIx64 "\n", handle_info.handle);
+                    }
+                    else if (name == u"\\BaseNamedObjects") // Or similar common directories
+                    {
+                        created_handle = BASE_NAMED_OBJECTS_DIRECTORY;
+                        win_emu.log.info("  Identified BaseNamedObjects directory handle: 0x%" PRIx64 "\n", handle_info.handle);
+                    }
+                    else if (name == u"\\RPC Control")
+                    {
+                        created_handle = RPC_CONTROL_DIRECTORY;
+                        win_emu.log.info("  Identified RPC Control directory handle: 0x%" PRIx64 "\n", handle_info.handle);
+                    }
+                    else
+                    {
+                        // We can't store generic directories yet as there is no directory store in process_context
+                        win_emu.log.warn("  Skipping generic directory handle: %s (0x%" PRIx64 ")\n", handle_info.object_name.c_str(), handle_info.handle);
+                    }
 
+                    if (created_handle.bits != 0)
+                    {
+                        // If it's a pseudo handle (like KNOWN_DLLS_DIRECTORY), we don't count it as 'created' in the store sense,
+                        // but we definitely need to map it.
+                        win_emu.process.minidump_handle_mapping[handle_info.handle] = created_handle;
+                        win_emu.log.info("  Mapped directory handle 0x%" PRIx64 " -> emulator handle 0x%" PRIx64 "\n",
+                                        handle_info.handle, created_handle.bits);
+                        
+                        // Only increment if we actually stored something new, but pseudo handles are fine too for stats
+                        created_count++;
+                    }
+                    continue; // Skip the default mapping logic below as we handled it here
+                }
                 // Map the minidump raw handle to the emulator encoded handle
                 if (created_handle.bits != 0)
                 {

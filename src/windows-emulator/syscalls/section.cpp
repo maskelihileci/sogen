@@ -96,10 +96,18 @@ namespace syscalls
             return STATUS_NOT_SUPPORTED;
         }
 
-        if (attributes.RootDirectory != KNOWN_DLLS_DIRECTORY && attributes.RootDirectory != BASE_NAMED_OBJECTS_DIRECTORY)
+        if (attributes.RootDirectory != 0 &&
+            attributes.RootDirectory != KNOWN_DLLS_DIRECTORY &&
+            attributes.RootDirectory != BASE_NAMED_OBJECTS_DIRECTORY)
         {
-            c.win_emu.log.error("Unsupported section\n");
-            return STATUS_NOT_SUPPORTED;
+            // Check if the handle maps to a known directory in minidump mode
+            const auto resolved_root = resolve_minidump_handle(make_handle(attributes.RootDirectory), c.proc.minidump_handle_mapping);
+            
+            if (resolved_root != KNOWN_DLLS_DIRECTORY && resolved_root != BASE_NAMED_OBJECTS_DIRECTORY)
+            {
+                c.win_emu.log.warn("Unknown RootDirectory handle in NtOpenSection: %llX -> %llX (ignored)\n",
+                                   attributes.RootDirectory, resolved_root.bits);
+            }
         }
 
         utils::string::to_lower_inplace(filename);
